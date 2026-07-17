@@ -1,0 +1,11 @@
+# Synthetic example only. Generated per-session configuration is written by cc-remote.
+Host cc-remote-example-session
+  HostName 127.0.0.1
+  Port 40022
+  User target-user
+  IdentityFile ~/.cc-remote/keys/example-target-ed25519
+  IdentitiesOnly yes
+  HostKeyAlias cc-remote-example-session
+  UserKnownHostsFile ~/.cc-remote/sessions/example-session/known_hosts_target
+  StrictHostKeyChecking accept-new
+  ProxyCommand ssh -p 22 -i ~/.cc-remote/keys/example-tunnel-ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=~/.cc-remote/sessions/example-session/known_hosts_relay -W 127.0.0.1:40022 cc-tunnel@relay.example.test

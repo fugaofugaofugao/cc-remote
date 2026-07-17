@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose a provider-neutral improvement using synthetic examples
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include real endpoints, identities, session data, launchers, keys, logs, or connection metadata. Use SECURITY.md for sensitive security proposals.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the general problem without operational data.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Use reserved domains and synthetic examples.
+    validations:
+      required: true
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: Security invariants
+      options:
+        - label: The proposal keeps relay listeners loopback-only unless a separately reviewed threat model is supplied.
+          required: true
+        - label: The proposal preserves exact-session cleanup and keeps shared sshd outside session ownership.
+          required: true
+        - label: I removed real deployment and session information.
+          required: true

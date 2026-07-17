@@ -1,0 +1,9 @@
+cc-remote
+
+This distribution contains cc-remote project source under the MIT License.
+
+The self-contained source distribution also contains an unmodified upstream
+PowerShell/Win32-OpenSSH binary archive. That component is not relicensed by
+the cc-remote MIT License. Its original LICENSE.txt and NOTICE.txt remain
+inside the nested archive, and its provenance and pinned digest are recorded
+in THIRD_PARTY_NOTICES.md.
