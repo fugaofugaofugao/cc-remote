@@ -53,7 +53,7 @@ elif command -v pwsh >/dev/null 2>&1; then
 fi
 if [ -n "$powershell_bin" ]; then
   while IFS= read -r script; do
-    "$powershell_bin" -NoProfile -Command '$errors=$null; [void][System.Management.Automation.Language.Parser]::ParseFile($args[0],[ref]$null,[ref]$errors); if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }' "$script"
+    CC_REMOTE_PARSE_FILE="$script" "$powershell_bin" -NoProfile -Command '$errors=$null; [void][System.Management.Automation.Language.Parser]::ParseFile($env:CC_REMOTE_PARSE_FILE,[ref]$null,[ref]$errors); if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }'
   done < <(find "$ROOT/bootstrap" "$ROOT/scripts" -type f -name '*.ps1' -print | LC_ALL=C sort)
   if [ "$(uname -s)" = MINGW* ] || [ "$(uname -s)" = MSYS* ] || [ "$(uname -s)" = CYGWIN* ] || [ "${OS:-}" = Windows_NT ]; then
     while IFS= read -r script; do
