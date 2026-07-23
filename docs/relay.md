@@ -14,6 +14,47 @@ Each reverse listener is requested as `127.0.0.1:<port>` and is reachable by the
 
 Use a dedicated account, normally `cc-tunnel`. Do not reuse a personal administrator account.
 
+## AI prompt for relay setup
+
+Copy this prompt when an AI/operator needs to prepare the relay before creating a
+cc-remote launcher:
+
+```text
+Prepare a cc-remote relay on a public Linux/OpenSSH server that the operator
+controls. Do not use a third-party or production server unless the operator has
+explicitly authorized this exact relay host.
+
+Required inputs:
+- Relay administrative SSH destination, for example root@relay.example.test or a
+  configured SSH alias.
+- Public relay endpoint that controlled machines will dial, for example
+  relay.example.test.
+- Public relay SSH port, for example 22 or 39022.
+- Dedicated relay user, normally cc-tunnel.
+
+Steps:
+1. Run locally: cc-remote init-relay --user cc-tunnel
+2. Review the printed commands before applying them.
+3. On the relay, create/verify the dedicated cc-tunnel account with no password
+   login and no interactive shell.
+4. Add an sshd_config Match block for that user:
+   Match User cc-tunnel
+     PasswordAuthentication no
+     PermitTTY no
+     X11Forwarding no
+     AllowTcpForwarding yes
+     GatewayPorts no
+5. Validate with sudo sshd -t.
+6. Reload sshd with the platform-supported reload command. Prefer reload; do not
+   restart shared sshd unless the operator explicitly approves the risk.
+7. Do not add broad GatewayPorts/public listeners. cc-remote sessions must use
+   loopback-only reverse listeners: 127.0.0.1:<port>.
+8. After cc-remote create --json prints relay_authorized_key_line, append that
+   exact line to ~cc-tunnel/.ssh/authorized_keys, preserving unrelated lines.
+9. Never remove unrelated authorized_keys entries. Cleanup may remove only the
+   exact cc-remote:<session-id> marker for that session.
+```
+
 ## Create the dedicated account
 
 Print a starting configuration:

@@ -176,7 +176,19 @@ https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.2.0
    - macOS/Linux: "$HOME/.local/share/cc-remote/cc-remote" doctor --json
    - Windows: & "$env:LOCALAPPDATA\Programs\cc-remote\cc-remote.exe" doctor --json
 5. Continue only if doctor JSON has ok=true. If not, stop and report the JSON.
-6. Create one single-platform launcher with JSON output:
+6. Confirm there is a public Linux/OpenSSH relay server controlled by the
+   operator. You need: relay public host/IP, SSH port, and a dedicated relay user
+   such as cc-tunnel. If the relay is not configured yet, stop and ask for an
+   administrative SSH destination for that relay; do not invent one.
+7. Configure or verify the relay before creating a controlled-machine launcher:
+   - Run: cc-remote init-relay --user cc-tunnel
+   - Apply the printed Match User policy on the relay you control.
+   - Keep GatewayPorts no.
+   - Validate with sudo sshd -t and reload sshd; prefer reload, not restart.
+   - The relay user must have no password login and no interactive shell.
+8. Create one single-platform launcher with JSON output. By default this does not
+   modify the relay; it prints one restricted authorized_keys line that must be
+   installed for the dedicated relay user:
    cc-remote create --json \
      --name <target-name> \
      --platform <windows|macos|linux> \
@@ -193,17 +205,21 @@ https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.2.0
    - Windows: cmd
    - macOS: command
    - Linux: sh
-7. Send only files listed in share_with_recipient to the authorized controlled
-   machine. Do not send files listed in operator_only.
-8. Never print, copy, upload, or paste private-key bodies. Key information means
-   operator-side private-key paths and public-key fingerprints only.
-9. Accept only the complete READY line emitted by the controlled launcher after
-   verification:
-   CC_REMOTE_READY <session-id> <target-user> <relay-host> <remote-port>
-   Never invent or construct READY.
-10. Register READY on the operator machine:
+9. Install the exact relay_authorized_key_line from create --json into the relay
+   user's authorized_keys, preserving unrelated keys. Only use
+   --install-relay=true when the operator explicitly authorizes relay mutation
+   and provides --relay-ssh-host.
+10. Send only files listed in share_with_recipient to the authorized controlled
+    machine. Do not send files listed in operator_only.
+11. Never print, copy, upload, or paste private-key bodies. Key information means
+    operator-side private-key paths and public-key fingerprints only.
+12. Accept only the complete READY line emitted by the controlled launcher after
+    verification:
+    CC_REMOTE_READY <session-id> <target-user> <relay-host> <remote-port>
+    Never invent or construct READY.
+13. Register READY on the operator machine:
     cc-remote ready 'CC_REMOTE_READY ...'
-11. Start with read-only checks only, such as hostname, current user, and OS
+14. Start with read-only checks only, such as hostname, current user, and OS
     version. Do not modify the controlled machine until that exact work is
     authorized.
 ```
