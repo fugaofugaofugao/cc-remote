@@ -45,6 +45,11 @@ if grep -F 'bootstrap.ps1" -MonitorOnly' "$ROOT/cmd/cc-remote/main.go" | grep -F
 fi
 grep -F 'exec /bin/bash "$0" "$@"' "$ROOT/cmd/cc-remote/main.go" >/dev/null
 
+grep -F './install.sh' "$ROOT/scripts/install.command" >/dev/null
+grep -F 'install.ps1' "$ROOT/scripts/install.cmd" >/dev/null
+go -C "$ROOT" run ./cmd/cc-remote version >/dev/null
+go -C "$ROOT" run ./cmd/cc-remote doctor --json --platform macos >/dev/null
+
 powershell_bin=""
 if command -v powershell >/dev/null 2>&1; then
   powershell_bin="$(command -v powershell)"

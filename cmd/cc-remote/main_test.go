@@ -98,6 +98,35 @@ func TestNonWindowsCreateDoesNotRequireWindowsPayload(t *testing.T) {
 	}
 }
 
+func TestCreateJSONStdoutIsPureJSON(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	out, err := captureStdout(t, func() error {
+		return run([]string{"cc-remote", "create", "--json", "--name", "json-only", "--platform", "macos", "--launcher-format", "command", "--relay-host", "relay.example.test", "--relay-port", "22", "--install-relay=false", "--payload-root", t.TempDir()})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result createResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("create --json stdout is not pure JSON: %v\n%s", err, out)
+	}
+	if !result.OK || result.SessionID == "" || result.LauncherFormat != "command" || result.HandoffMode != "embedded" {
+		t.Fatalf("unexpected create result: %+v", result)
+	}
+	if strings.Contains(out, "Generating public/private") || strings.Contains(out, "randomart") {
+		t.Fatalf("create --json stdout contains ssh-keygen noise:\n%s", out)
+	}
+}
+
+func TestCreateRejectsIncompatibleLauncherFormat(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	err := run([]string{"cc-remote", "create", "--name", "bad-format", "--platform", "linux", "--launcher-format", "cmd", "--relay-host", "relay.example.test", "--relay-port", "22", "--install-relay=false", "--payload-root", t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "--platform linux cannot generate cmd launcher") {
+		t.Fatalf("expected incompatible format error, got %v", err)
+	}
+	assertNoSessionArtifacts(t)
+}
+
 func TestMacOSCreateBuildsParseableCommandWithoutWindowsPayload(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	if err := run([]string{"cc-remote", "create", "--name", "mac-command", "--platform", "macos", "--relay-host", "relay.example.test", "--relay-port", "22", "--install-relay=false", "--payload-root", t.TempDir()}); err != nil {
@@ -643,11 +672,11 @@ func TestCreateBuildsUsableSessionBundle(t *testing.T) {
 	if rec.TunnelKeyPath == "" {
 		t.Fatal("record is missing tunnel key path")
 	}
-	if rec.HandoffCMDPath == "" || rec.HandoffPS1Path == "" {
-		t.Fatal("Windows record is missing Windows handoff script paths")
+	if rec.HandoffCMDPath == "" {
+		t.Fatal("Windows record is missing default .cmd handoff script path")
 	}
-	if rec.HandoffShPath != "" || rec.HandoffCommandPath != "" {
-		t.Fatal("Windows record unexpectedly contains Unix or macOS handoff paths")
+	if rec.HandoffPS1Path != "" || rec.HandoffShPath != "" || rec.HandoffCommandPath != "" {
+		t.Fatal("Windows default record unexpectedly contains non-default launcher paths")
 	}
 	if rec.ConnectionMDPath == "" || rec.ConnectionJSONPath == "" || rec.SSHConfigPath == "" || rec.SSHHostAlias == "" {
 		t.Fatal("record is missing connection artifact paths")
@@ -836,6 +865,15 @@ func TestCreateBuildsUsableSessionBundle(t *testing.T) {
 			t.Fatalf("bundle missing %s", name)
 		}
 	}
+
+	t.Setenv("HOME", t.TempDir())
+	if err := run([]string{"cc-remote", "create", "--name", "unit-both", "--platform", "windows", "--launcher-format", "both", "--relay-host", "relay.example.test", "--relay-port", "22", "--relay-user", "cc-tunnel", "--install-relay=false", "--target-user", "tester", "--payload-root", payloadRoot}); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ = onlySessionRecord(t)
+	if rec.HandoffCMDPath == "" || rec.HandoffPS1Path == "" {
+		t.Fatal("Windows --launcher-format both should create both .cmd and .ps1 launchers")
+	}
 }
 
 func TestCreateValidationLeavesNoSessionArtifacts(t *testing.T) {
@@ -850,6 +888,7 @@ func TestCreateValidationLeavesNoSessionArtifacts(t *testing.T) {
 		{name: "reverse port negative", args: []string{"--platform", "macos", "--relay-host", "relay.example.test", "--remote-port", "-1"}, want: "invalid --remote-port"},
 		{name: "reverse port too large", args: []string{"--platform", "macos", "--relay-host", "relay.example.test", "--remote-port", "65536"}, want: "invalid --remote-port"},
 		{name: "install missing administrative host", args: []string{"--platform", "macos", "--relay-host", "relay.example.test", "--install-relay=true"}, want: "--relay-ssh-host is required"},
+		{name: "invalid relay user", args: []string{"--platform", "macos", "--relay-host", "relay.example.test", "--relay-user", "bad user;touch /tmp/nope"}, want: "invalid relay user"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -96,23 +96,112 @@ function Resolve-TargetUser {
   return [string]$user.Name
 }
 
+function Get-OpenSSHPayloadManifest {
+  foreach ($payload in @($Manifest.payloads)) {
+    if ($payload.path -eq 'payloads/windows/openssh-win64.zip') { return $payload }
+  }
+  throw 'The required offline OpenSSH payload is not listed in manifest.json. Ask the operator to regenerate this launcher.'
+}
+
+function Get-OpenSSHCacheRoot {
+  $payload = Get-OpenSSHPayloadManifest
+  $digest = ([string]$payload.sha256).ToLowerInvariant()
+  return Join-Path $env:ProgramData "cc-remote\payloads\windows\openssh-win64\$digest"
+}
+
+function Find-OpenSSHCacheFile {
+  param(
+    [Parameter(Mandatory=$true)][string]$Path,
+    [Parameter(Mandatory=$true)][string]$Name
+  )
+  return Get-ChildItem -Path $Path -Filter $Name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+}
+
+function Test-OpenSSHCache {
+  param([Parameter(Mandatory=$true)][string]$Path)
+  $sentinel = Join-Path $Path '.cc-remote-payload.json'
+  if (-not (Test-Path -LiteralPath $sentinel -PathType Leaf)) { return $false }
+  try {
+    $payload = Get-OpenSSHPayloadManifest
+    $meta = Get-Content -LiteralPath $sentinel -Raw | ConvertFrom-Json
+    if (([string]$meta.sha256).ToLowerInvariant() -ne ([string]$payload.sha256).ToLowerInvariant()) { return $false }
+    foreach ($name in @('ssh.exe', 'ssh-keygen.exe', 'install-sshd.ps1')) {
+        $file = Find-OpenSSHCacheFile -Path $Path -Name $name
+      if (-not $file) { return $false }
+      if ($meta.files -and $meta.files.$name) {
+        $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+        if ($hash -ne ([string]$meta.files.$name).ToLowerInvariant()) { return $false }
+      }
+    }
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 function Find-BundledSSHClient {
-  $payloadRoot = Join-Path $env:ProgramData 'cc-remote\payloads\OpenSSH-Win64'
-  $client = Get-ChildItem -Path $payloadRoot -Filter ssh.exe -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+  $payloadRoot = Get-OpenSSHCacheRoot
+  if (-not (Test-OpenSSHCache -Path $payloadRoot)) { return $null }
+  $client = Find-OpenSSHCacheFile -Path $payloadRoot -Name 'ssh.exe'
   if ($client) { return $client.FullName }
   return $null
 }
 
-function Expand-BundledOpenSSH {
+function Ensure-BundledOpenSSHCache {
+  $payload = Get-OpenSSHPayloadManifest
   $zip = Join-Path $Root 'payloads\windows\openssh-win64.zip'
   if (-not (Test-Path $zip)) {
     throw 'The required offline OpenSSH payload is not bundled. Ask the operator to regenerate this launcher.'
   }
-  $dest = Join-Path $env:ProgramData 'cc-remote\payloads\OpenSSH-Win64'
-  Remove-Item -Recurse -Force -Path $dest -ErrorAction SilentlyContinue
-  New-Item -ItemType Directory -Force -Path $dest | Out-Null
-  Expand-Archive -Force -Path $zip -DestinationPath $dest
-  return $dest
+  $dest = Get-OpenSSHCacheRoot
+  if (Test-OpenSSHCache -Path $dest) {
+    Write-Stage "Using cached verified OpenSSH payload: $dest"
+    return $dest
+  }
+  $parent = Split-Path -Parent $dest
+  New-Item -ItemType Directory -Force -Path $parent | Out-Null
+  $tmp = Join-Path $parent ('.extracting-' + $SessionId + '-' + [Guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+  try {
+    Write-Stage "Extracting verified OpenSSH payload into cache: $dest"
+    Expand-Archive -Force -Path $zip -DestinationPath $tmp
+    foreach ($name in @('ssh.exe', 'ssh-keygen.exe', 'install-sshd.ps1')) {
+      if (-not (Find-OpenSSHCacheFile -Path $tmp -Name $name)) { throw "Cached OpenSSH payload is missing $name after extraction." }
+    }
+    $fileHashes = [ordered]@{}
+    foreach ($name in @('ssh.exe', 'ssh-keygen.exe', 'install-sshd.ps1')) {
+      $file = Find-OpenSSHCacheFile -Path $tmp -Name $name
+      $fileHashes[$name] = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+    }
+    [pscustomobject]@{
+      name = 'OpenSSH-Win64'
+      sha256 = ([string]$payload.sha256).ToLowerInvariant()
+      source = 'payloads/windows/openssh-win64.zip'
+      prepared_by = 'cc-remote'
+      files = $fileHashes
+    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $tmp '.cc-remote-payload.json') -Encoding UTF8
+    if (Test-Path -LiteralPath $dest) {
+      $stale = Join-Path $parent ('.stale-' + $SessionId + '-' + [Guid]::NewGuid().ToString('N'))
+      try {
+        Move-Item -LiteralPath $dest -Destination $stale -ErrorAction Stop
+        Move-Item -LiteralPath $tmp -Destination $dest
+        $tmp = $null
+      } catch {
+        if (-not (Test-OpenSSHCache -Path $dest)) { throw }
+      } finally {
+        if (Test-Path -LiteralPath $stale) { Remove-Item -Recurse -Force -LiteralPath $stale -ErrorAction SilentlyContinue }
+      }
+    } else {
+      Move-Item -LiteralPath $tmp -Destination $dest
+      $tmp = $null
+    }
+    if (-not (Test-OpenSSHCache -Path $dest)) { throw 'OpenSSH payload cache validation failed after extraction.' }
+    return $dest
+  } finally {
+    if ($tmp -and (Test-Path -LiteralPath $tmp)) {
+      Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
+    }
+  }
 }
 
 function Ensure-OpenSSHServer {
@@ -125,7 +214,7 @@ function Ensure-OpenSSHServer {
     }
     if (-not $client) {
       Write-Stage 'The existing sshd service has no available SSH client; extracting the embedded client without reinstalling sshd.'
-      $dest = Expand-BundledOpenSSH
+      $dest = Ensure-BundledOpenSSHCache
       $clientFile = Get-ChildItem -Path $dest -Filter ssh.exe -File -Recurse | Select-Object -First 1
       if ($clientFile) { $client = $clientFile.FullName }
     }
@@ -134,7 +223,7 @@ function Ensure-OpenSSHServer {
   }
 
   Write-Stage 'Installing OpenSSH Server from the embedded offline payload.'
-  $dest = Expand-BundledOpenSSH
+  $dest = Ensure-BundledOpenSSHCache
   $install = Get-ChildItem -Path $dest -Filter install-sshd.ps1 -File -Recurse | Select-Object -First 1
   $client = Get-ChildItem -Path $dest -Filter ssh.exe -File -Recurse | Select-Object -First 1
   if (-not $install) { throw 'install-sshd.ps1 was not found in the verified offline OpenSSH payload.' }

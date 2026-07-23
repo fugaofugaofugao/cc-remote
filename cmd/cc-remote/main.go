@@ -6,11 +6,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,11 +24,27 @@ import (
 	"github.com/fugaofugaofugao/cc-remote/internal/session"
 )
 
+var (
+	version       = "dev"
+	commit        = "unknown"
+	date          = "unknown"
+	relayUserName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+)
+
 const (
 	autoTargetUser        = "auto"
 	windowsOpenSSHPayload = "payloads/windows/openssh-win64.zip"
 	windowsOpenSSHSHA256  = "23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba5"
 )
+
+var requiredBootstrapAssets = []string{
+	"bootstrap/bootstrap.sh",
+	"bootstrap/bootstrap.ps1",
+	"bootstrap/cleanup.sh",
+	"bootstrap/cleanup.ps1",
+	"bootstrap/idle-watch.sh",
+	"bootstrap/idle-watch.ps1",
+}
 
 func main() {
 	if err := run(os.Args); err != nil {
@@ -42,6 +61,10 @@ func run(args []string) error {
 	switch args[1] {
 	case "create":
 		return create(args[2:])
+	case "doctor":
+		return doctor(args[2:])
+	case "version":
+		return printVersion()
 	case "ready":
 		return ready(args[2:])
 	case "list":
@@ -65,6 +88,8 @@ func usage() {
 
 Commands:
   create      create a foolproof one-shot handoff script and session bundle
+  doctor      verify installed binary/assets and payload readiness
+  version     print version/build information
   ready       paste the CC_REMOTE_READY line back to save the detected target user
   list        list local sessions
   show        print the complete operator-side connection information
@@ -87,7 +112,10 @@ func create(args []string) error {
 	idleTimeout := fs.Duration("idle-timeout", 2*time.Hour, "cleanup after this much time with no active SSH connection")
 	payloadRoot := fs.String("payload-root", "payloads", "offline payload root")
 	platform := fs.String("platform", "all", "launcher platform: windows, macos, linux, or all")
+	launcherFormat := fs.String("launcher-format", "default", "launcher format: default, cmd, ps1, both, sh, command, or all")
+	handoffMode := fs.String("handoff-mode", "embedded", "handoff mode: embedded or bundle")
 	remotePort := fs.Int("remote-port", 0, "relay reverse port; auto if 0")
+	jsonOutput := fs.Bool("json", false, "print machine-readable creation result")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -98,6 +126,9 @@ func create(args []string) error {
 	*relaySSHHost = strings.TrimSpace(*relaySSHHost)
 	if *relayHost == "" {
 		return errors.New("--relay-host is required; configure the public endpoint of a relay you control")
+	}
+	if err := validateRelayUser(*relayUser); err != nil {
+		return err
 	}
 	if *relayPort < 1 || *relayPort > 65535 {
 		return fmt.Errorf("invalid --relay-port %d: use a port from 1 to 65535", *relayPort)
@@ -115,9 +146,29 @@ func create(args []string) error {
 	if *platform != "windows" && *platform != "macos" && *platform != "linux" && *platform != "all" {
 		return fmt.Errorf("invalid --platform %q: use windows, macos, linux, or all", *platform)
 	}
-	payloads, err := collectPlatformPayloads(*payloadRoot, *platform)
+	*launcherFormat = strings.ToLower(strings.TrimSpace(*launcherFormat))
+	if *launcherFormat == "" {
+		*launcherFormat = "default"
+	}
+	if !validLauncherFormat(*launcherFormat) {
+		return fmt.Errorf("invalid --launcher-format %q: use default, cmd, ps1, both, sh, command, or all", *launcherFormat)
+	}
+	*handoffMode = strings.ToLower(strings.TrimSpace(*handoffMode))
+	if *handoffMode != "embedded" && *handoffMode != "bundle" {
+		return fmt.Errorf("invalid --handoff-mode %q: use embedded or bundle", *handoffMode)
+	}
+	formats := selectedLauncherFormats(*platform, *launcherFormat)
+	if err := validateLauncherFormatsForPlatform(*platform, formats); err != nil {
+		return err
+	}
+	payloadPlatform := payloadPlatformForFormats(*platform, formats)
+	payloads, err := collectPlatformPayloads(*payloadRoot, payloadPlatform)
 	if err != nil {
 		return err
+	}
+	subprocessStdout := io.Writer(os.Stdout)
+	if *jsonOutput {
+		subprocessStdout = os.Stderr
 	}
 
 	id, err := session.NewID()
@@ -145,10 +196,10 @@ func create(args []string) error {
 
 	tunnelKey := filepath.Join(sessDir, "tunnel_ed25519")
 	targetKey := filepath.Join(sessDir, "target_ed25519")
-	if err := sshKeygen(tunnelKey, "cc-remote tunnel "+id); err != nil {
+	if err := sshKeygen(tunnelKey, "cc-remote tunnel "+id, subprocessStdout, os.Stderr); err != nil {
 		return err
 	}
-	if err := sshKeygen(targetKey, "cc-remote target "+id); err != nil {
+	if err := sshKeygen(targetKey, "cc-remote target "+id, subprocessStdout, os.Stderr); err != nil {
 		return err
 	}
 	tunnelPub, err := os.ReadFile(tunnelKey + ".pub")
@@ -225,13 +276,17 @@ func create(args []string) error {
 	if err := bundle.CreateZip(bundlePath, files); err != nil {
 		return err
 	}
+	bundleHash, err := bundle.HashFile(bundlePath)
+	if err != nil {
+		return fmt.Errorf("hash generated session bundle: %w", err)
+	}
 
 	relayAuth := fmt.Sprintf("permitopen=\"127.0.0.1:%d\",permitlisten=\"127.0.0.1:%d\",no-pty,no-X11-forwarding %s cc-remote:%s", port, port, strings.TrimSpace(string(tunnelPub)), id)
 	relayInstalled := false
 	relayInstallCmd := ""
 	if *installRelay {
 		relayInstallCmd = relayInstallCommand(*relayUser, relayAuth)
-		if err := runRelayInstall(*relaySSHHost, relayInstallCmd); err != nil {
+		if err := runRelayInstall(*relaySSHHost, relayInstallCmd, subprocessStdout, os.Stderr); err != nil {
 			return err
 		}
 		relayInstalled = true
@@ -245,21 +300,36 @@ func create(args []string) error {
 	bundlePS1 := filepath.Join(base, "bundles", "cc-remote-"+id+".ps1")
 	bundleSh := filepath.Join(base, "bundles", "cc-remote-"+id+".sh")
 	bundleCommand := filepath.Join(base, "bundles", "cc-remote-"+id+".command")
-	if *platform == "windows" || *platform == "all" {
-		if err := writeWindowsHandoffScripts(bundlePath, handoffCMD, handoffPS1, id); err != nil {
+	if formats["cmd"] || formats["ps1"] {
+		cmdOut, ps1Out := "", ""
+		if formats["cmd"] {
+			cmdOut = handoffCMD
+		}
+		if formats["ps1"] {
+			ps1Out = handoffPS1
+		}
+		if err := writeWindowsHandoffScripts(bundlePath, cmdOut, ps1Out, id, *handoffMode, bundleHash.SHA256); err != nil {
 			return err
 		}
-		if err := copyFile(bundleCMD, handoffCMD, 0o600); err != nil {
-			return err
+		if formats["cmd"] {
+			if err := copyFile(bundleCMD, handoffCMD, 0o600); err != nil {
+				return err
+			}
+		} else {
+			bundleCMD = ""
 		}
-		if err := copyFile(bundlePS1, handoffPS1, 0o600); err != nil {
-			return err
+		if formats["ps1"] {
+			if err := copyFile(bundlePS1, handoffPS1, 0o600); err != nil {
+				return err
+			}
+		} else {
+			bundlePS1 = ""
 		}
 	} else {
 		bundleCMD, bundlePS1 = "", ""
 	}
-	if *platform == "linux" || *platform == "all" {
-		if err := writeUnixHandoffScript(bundlePath, handoffSh, id); err != nil {
+	if formats["sh"] {
+		if err := writeUnixHandoffScript(bundlePath, handoffSh, id, *handoffMode, bundleHash.SHA256); err != nil {
 			return err
 		}
 		if err := copyFile(bundleSh, handoffSh, 0o700); err != nil {
@@ -268,8 +338,8 @@ func create(args []string) error {
 	} else {
 		bundleSh = ""
 	}
-	if *platform == "macos" || *platform == "all" {
-		if err := writeUnixHandoffScript(bundlePath, handoffCommand, id); err != nil {
+	if formats["command"] {
+		if err := writeUnixHandoffScript(bundlePath, handoffCommand, id, *handoffMode, bundleHash.SHA256); err != nil {
 			return err
 		}
 		if err := copyFile(bundleCommand, handoffCommand, 0o700); err != nil {
@@ -306,6 +376,9 @@ func create(args []string) error {
 		RelayAuthKey:       relayAuth,
 		RelayInstalled:     relayInstalled,
 		RelayInstallCmd:    relayInstallCmd,
+		BundleSHA256:       bundleHash.SHA256,
+		LauncherFormat:     *launcherFormat,
+		HandoffMode:        *handoffMode,
 	}
 	if err := writeJSON(filepath.Join(sessDir, "record.json"), rec, 0o600); err != nil {
 		return err
@@ -314,10 +387,19 @@ func create(args []string) error {
 		return err
 	}
 
+	if *jsonOutput {
+		return printJSON(createResultFromRecord(rec))
+	}
+
 	fmt.Println("Session created:", id)
 	if bundleCMD != "" {
 		fmt.Println("Windows double-click launcher:", bundleCMD)
+	}
+	if bundlePS1 != "" {
 		fmt.Println("Windows PowerShell fallback:", bundlePS1)
+	}
+	if *handoffMode == "bundle" {
+		fmt.Println("Offline bundle to send beside the launcher:", bundlePath)
 	}
 	if bundleCommand != "" {
 		fmt.Println("macOS double-click launcher:", bundleCommand)
@@ -338,7 +420,11 @@ func create(args []string) error {
 	fmt.Println("Session SSH config:", sshConfig)
 	fmt.Println()
 	if bundleCMD != "" {
-		fmt.Println("Windows: send the .cmd file; double-click it and approve the UAC prompt.")
+		if *handoffMode == "bundle" {
+			fmt.Println("Windows: send the .cmd file and the session .zip together; double-click the .cmd and approve the UAC prompt.")
+		} else {
+			fmt.Println("Windows: send the .cmd file; double-click it and approve the UAC prompt.")
+		}
 	}
 	if bundleCommand != "" {
 		fmt.Println("macOS: send the .command file; double-click it and enter the Mac login password once.")
@@ -348,6 +434,281 @@ func create(args []string) error {
 	fmt.Println("Process only the genuine CC_REMOTE_READY line shown after tunnel verification. Then run:")
 	fmt.Printf("  cc-remote ready 'CC_REMOTE_READY ...' && cc-remote ssh %s\n", *name)
 	return nil
+}
+
+func printVersion() error {
+	fmt.Printf("cc-remote %s\n", version)
+	fmt.Printf("commit: %s\n", commit)
+	fmt.Printf("date: %s\n", date)
+	fmt.Printf("go: %s %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	return nil
+}
+
+type doctorCheck struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+type doctorResult struct {
+	OK       bool          `json:"ok"`
+	Version  string        `json:"version"`
+	Commit   string        `json:"commit"`
+	Date     string        `json:"date"`
+	GOOS     string        `json:"goos"`
+	GOARCH   string        `json:"goarch"`
+	Mode     string        `json:"mode"`
+	Checks   []doctorCheck `json:"checks"`
+	Warnings []string      `json:"warnings,omitempty"`
+}
+
+func doctorAssetCheck(assetRoot, rel string) doctorCheck {
+	path := filepath.Join(assetRoot, rel)
+	if _, err := os.Stat(path); err != nil {
+		return doctorCheck{Name: "asset:" + rel, OK: false, Path: path, Error: err.Error()}
+	}
+	return doctorCheck{Name: "asset:" + rel, OK: true, Path: path}
+}
+
+func doctorCommandCheck(name string) doctorCheck {
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return doctorCheck{Name: name, OK: false, Error: err.Error()}
+	}
+	return doctorCheck{Name: name, OK: true, Path: path}
+}
+
+func doctor(args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	jsonOutput := fs.Bool("json", false, "print machine-readable result")
+	platform := fs.String("platform", "all", "platform to verify: windows, macos, linux, or all")
+	payloadRoot := fs.String("payload-root", "payloads", "offline payload root")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	*platform = strings.ToLower(strings.TrimSpace(*platform))
+	if *platform != "windows" && *platform != "macos" && *platform != "linux" && *platform != "all" {
+		return fmt.Errorf("invalid --platform %q: use windows, macos, linux, or all", *platform)
+	}
+	res := doctorResult{
+		OK:      true,
+		Version: version,
+		Commit:  commit,
+		Date:    date,
+		GOOS:    runtime.GOOS,
+		GOARCH:  runtime.GOARCH,
+		Mode:    "portable",
+	}
+	add := func(c doctorCheck) {
+		if !c.OK {
+			res.OK = false
+		}
+		res.Checks = append(res.Checks, c)
+	}
+
+	assetRoot, err := findAssetRoot()
+	if err != nil {
+		add(doctorCheck{Name: "asset_root", OK: false, Error: err.Error()})
+	} else {
+		add(doctorCheck{Name: "asset_root", OK: true, Path: assetRoot})
+		for _, rel := range requiredBootstrapAssets {
+			add(doctorAssetCheck(assetRoot, rel))
+		}
+	}
+	for _, name := range []string{"ssh-keygen", "ssh"} {
+		add(doctorCommandCheck(name))
+	}
+	payloadCheckRoot := *payloadRoot
+	if !filepath.IsAbs(payloadCheckRoot) && assetRoot != "" {
+		payloadCheckRoot = filepath.Join(assetRoot, payloadCheckRoot)
+	}
+	if _, err := collectPlatformPayloads(payloadCheckRoot, *platform); err != nil {
+		add(doctorCheck{Name: "payloads", OK: false, Path: payloadCheckRoot, Error: err.Error()})
+	} else {
+		add(doctorCheck{Name: "payloads", OK: true, Path: payloadCheckRoot, Detail: "payloads verified for " + *platform})
+	}
+	if base, err := session.BaseDir(); err != nil {
+		add(doctorCheck{Name: "session_base", OK: false, Error: err.Error()})
+	} else {
+		add(doctorCheck{Name: "session_base", OK: true, Path: base, Detail: "created on first create"})
+	}
+
+	if *jsonOutput {
+		if err := printJSON(res); err != nil {
+			return err
+		}
+		if !res.OK {
+			return errors.New("doctor checks failed")
+		}
+		return nil
+	}
+	if res.OK {
+		fmt.Println("cc-remote doctor: ok")
+	} else {
+		fmt.Println("cc-remote doctor: failed")
+	}
+	for _, c := range res.Checks {
+		status := "ok"
+		if !c.OK {
+			status = "failed"
+		}
+		line := fmt.Sprintf("- %s: %s", c.Name, status)
+		if c.Path != "" {
+			line += " (" + c.Path + ")"
+		}
+		if c.Detail != "" {
+			line += " - " + c.Detail
+		}
+		if c.Error != "" {
+			line += " - " + c.Error
+		}
+		fmt.Println(line)
+	}
+	if !res.OK {
+		return errors.New("doctor checks failed")
+	}
+	return nil
+}
+
+type createResult struct {
+	OK                     bool     `json:"ok"`
+	SessionID              string   `json:"session_id"`
+	Name                   string   `json:"name"`
+	Status                 string   `json:"status"`
+	BundlePath             string   `json:"bundle_path"`
+	BundleSHA256           string   `json:"bundle_sha256,omitempty"`
+	ShareWithRecipient     []string `json:"share_with_recipient"`
+	OperatorOnly           []string `json:"operator_only"`
+	RelayHost              string   `json:"relay_host"`
+	RelaySSHPort           int      `json:"relay_ssh_port"`
+	RelayUser              string   `json:"relay_user"`
+	ReversePort            int      `json:"reverse_port"`
+	RelayInstalled         bool     `json:"relay_installed"`
+	RelayAuthorizedKeyLine string   `json:"relay_authorized_key_line,omitempty"`
+	ConnectionMDPath       string   `json:"connection_md_path"`
+	ConnectionJSONPath     string   `json:"connection_json_path"`
+	SSHConfigPath          string   `json:"ssh_config_path"`
+	LauncherFormat         string   `json:"launcher_format,omitempty"`
+	HandoffMode            string   `json:"handoff_mode,omitempty"`
+	NextStep               string   `json:"next_step"`
+}
+
+func createResultFromRecord(rec session.Record) createResult {
+	share := []string{}
+	for _, path := range []string{rec.HandoffCMDPath, rec.HandoffPS1Path, rec.HandoffShPath, rec.HandoffCommandPath} {
+		if path != "" {
+			share = append(share, path)
+		}
+	}
+	if rec.HandoffMode == "bundle" && rec.BundlePath != "" {
+		share = append(share, rec.BundlePath)
+	}
+	operator := []string{rec.ConnectionMDPath, rec.ConnectionJSONPath, rec.SSHConfigPath, rec.TargetKeyPath, rec.TunnelKeyPath}
+	result := createResult{
+		OK:                 true,
+		SessionID:          rec.ID,
+		Name:               rec.Name,
+		Status:             recordStatus(rec),
+		BundlePath:         rec.BundlePath,
+		BundleSHA256:       rec.BundleSHA256,
+		ShareWithRecipient: share,
+		OperatorOnly:       operator,
+		RelayHost:          rec.RelayHost,
+		RelaySSHPort:       rec.RelaySSHPort,
+		RelayUser:          rec.RelayUser,
+		ReversePort:        rec.RemotePort,
+		RelayInstalled:     rec.RelayInstalled,
+		ConnectionMDPath:   rec.ConnectionMDPath,
+		ConnectionJSONPath: rec.ConnectionJSONPath,
+		SSHConfigPath:      rec.SSHConfigPath,
+		LauncherFormat:     rec.LauncherFormat,
+		HandoffMode:        rec.HandoffMode,
+		NextStep:           "Send only the recipient launcher(s), wait for the genuine CC_REMOTE_READY line, then run cc-remote ready 'CC_REMOTE_READY ...'.",
+	}
+	if !rec.RelayInstalled {
+		result.RelayAuthorizedKeyLine = rec.RelayAuthKey
+	}
+	return result
+}
+
+func printJSON(v any) error {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(b))
+	return nil
+}
+
+func validLauncherFormat(format string) bool {
+	switch format {
+	case "default", "cmd", "ps1", "both", "sh", "command", "all":
+		return true
+	default:
+		return false
+	}
+}
+
+func selectedLauncherFormats(platform, format string) map[string]bool {
+	formats := map[string]bool{}
+	addDefaults := func() {
+		switch platform {
+		case "windows":
+			formats["cmd"] = true
+		case "linux":
+			formats["sh"] = true
+		case "macos":
+			formats["command"] = true
+		case "all":
+			formats["cmd"], formats["sh"], formats["command"] = true, true, true
+		}
+	}
+	if format == "default" {
+		addDefaults()
+		return formats
+	}
+	if format == "all" {
+		formats["cmd"], formats["ps1"], formats["sh"], formats["command"] = true, true, true, true
+		return formats
+	}
+	if format == "both" {
+		formats["cmd"], formats["ps1"] = true, true
+		return formats
+	}
+	formats[format] = true
+	return formats
+}
+
+func validateLauncherFormatsForPlatform(platform string, formats map[string]bool) error {
+	if platform == "all" {
+		return nil
+	}
+	for format := range formats {
+		switch platform {
+		case "windows":
+			if format != "cmd" && format != "ps1" {
+				return fmt.Errorf("--platform windows cannot generate %s launcher; use cmd, ps1, both, or all", format)
+			}
+		case "macos":
+			if format != "command" {
+				return fmt.Errorf("--platform macos cannot generate %s launcher; use command", format)
+			}
+		case "linux":
+			if format != "sh" {
+				return fmt.Errorf("--platform linux cannot generate %s launcher; use sh", format)
+			}
+		}
+	}
+	return nil
+}
+
+func payloadPlatformForFormats(platform string, formats map[string]bool) string {
+	if platform == "all" || formats["cmd"] || formats["ps1"] {
+		return "all"
+	}
+	return platform
 }
 
 func collectPlatformPayloads(root, platform string) ([]manifest.Payload, error) {
@@ -468,13 +829,15 @@ func ssh(args []string) error {
 	if rec.TargetUser == "" || rec.TargetUser == autoTargetUser {
 		return errors.New("target user is not known yet; paste the controlled machine's CC_REMOTE_READY line with: cc-remote ready 'CC_REMOTE_READY ...'")
 	}
+	proxyCommand := fmt.Sprintf("ssh -i %s -o IdentitiesOnly=yes -p %d -W 127.0.0.1:%d %s",
+		shellQuote(rec.TunnelKeyPath), rec.RelaySSHPort, rec.RemotePort, shellQuote(rec.RelayUser+"@"+rec.RelayHost))
 	sshArgs := []string{
 		"-i", rec.TargetKeyPath,
 		"-o", "IdentitiesOnly=yes",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "HostKeyAlias=" + rec.SSHHostAlias,
 		"-o", "UserKnownHostsFile=" + targetKnownHostsPath(rec),
-		"-o", fmt.Sprintf("ProxyCommand=ssh -i %s -o IdentitiesOnly=yes -p %d -W 127.0.0.1:%d %s@%s", rec.TunnelKeyPath, rec.RelaySSHPort, rec.RemotePort, rec.RelayUser, rec.RelayHost),
+		"-o", "ProxyCommand=" + proxyCommand,
 		fmt.Sprintf("%s@127.0.0.1", rec.TargetUser),
 	}
 	cmd := exec.Command("ssh", sshArgs...)
@@ -497,8 +860,11 @@ func closeSession(args []string) error {
 		if strings.TrimSpace(rec.RelaySSHHost) == "" {
 			return errors.New("cannot remove CLI-installed relay authorization: record has no administrative relay SSH host")
 		}
+		if err := validateRelayUser(rec.RelayUser); err != nil {
+			return fmt.Errorf("cannot remove CLI-installed relay authorization: %w", err)
+		}
 		cmd := fmt.Sprintf("tmp=$(mktemp) && grep -vF %s ~%s/.ssh/authorized_keys > $tmp && cat $tmp > ~%s/.ssh/authorized_keys && rm -f $tmp", shellQuote("cc-remote:"+rec.ID), rec.RelayUser, rec.RelayUser)
-		if err := runRelayInstall(rec.RelaySSHHost, cmd); err != nil {
+		if err := runRelayInstall(rec.RelaySSHHost, cmd, os.Stdout, os.Stderr); err != nil {
 			return err
 		}
 		relayAuthorizationRemoved = true
@@ -529,6 +895,9 @@ func initRelay(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if err := validateRelayUser(*user); err != nil {
+		return err
+	}
 	if !*printSnippet {
 		return nil
 	}
@@ -550,6 +919,13 @@ Match User %[1]s
 # Then validate and reload:
 sudo sshd -t && sudo systemctl reload sshd
 `, *user)
+	return nil
+}
+
+func validateRelayUser(user string) error {
+	if !relayUserName.MatchString(user) {
+		return fmt.Errorf("invalid relay user %q: use a Linux account name matching %s", user, relayUserName.String())
+	}
 	return nil
 }
 
@@ -578,10 +954,10 @@ sudo systemctl reload sshd 2>/dev/null || sudo service ssh reload 2>/dev/null ||
 `, user, quotedKey)
 }
 
-func runRelayInstall(alias, script string) error {
+func runRelayInstall(alias, script string, stdout, stderr io.Writer) error {
 	cmd := exec.Command("ssh", alias, script)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	return cmd.Run()
 }
 
@@ -748,12 +1124,172 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmpPath, path)
 }
 
-func writeWindowsHandoffScripts(bundlePath, cmdPath, ps1Path, id string) error {
+func writeWindowsHandoffScripts(bundlePath, cmdPath, ps1Path, id, mode, bundleSHA256 string) error {
+	if mode == "bundle" {
+		return writeBundleHandoffScripts(bundlePath, cmdPath, ps1Path, "", "", id, bundleSHA256)
+	}
 	return writeHandoffScripts(bundlePath, cmdPath, ps1Path, "", "", id)
 }
 
-func writeUnixHandoffScript(bundlePath, path, id string) error {
+func writeUnixHandoffScript(bundlePath, path, id, mode, bundleSHA256 string) error {
+	if mode == "bundle" {
+		return writeBundleHandoffScripts(bundlePath, "", "", path, "", id, bundleSHA256)
+	}
 	return writeHandoffScripts(bundlePath, "", "", path, "", id)
+}
+
+func writeBundleHandoffScripts(bundlePath, cmdPath, ps1Path, shPath, commandPath, id, bundleSHA256 string) error {
+	bundleName := filepath.Base(bundlePath)
+	cmdTemplate := `@echo off
+setlocal EnableExtensions DisableDelayedExpansion
+chcp 65001 >/dev/null
+title cc-remote __ID__ temporary support
+set "CC_REMOTE_SELF=%~f0"
+set "ROOT=%TEMP%\cc-remote-__ID__"
+set "ZIP=%~dp0__BUNDLE__"
+set "EXPECTED_SHA=__SHA__"
+set "LOG=%ProgramData%\cc-remote\sessions\__ID__\bootstrap.log"
+set "RC=1"
+
+net session >/dev/null 2>&1
+if errorlevel 1 (
+  if /I "%~1"=="--elevated" (
+    echo ERROR: Administrator privileges are still unavailable after UAC.
+    goto :failed
+  )
+  echo Requesting Administrator privileges through UAC...
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { Start-Process -FilePath $env:ComSpec -ArgumentList @('/d','/c',('""' + $env:CC_REMOTE_SELF + '" --elevated"')) -Verb RunAs -ErrorAction Stop } catch { Write-Host ('UAC launch failed: ' + $_.Exception.Message); exit 1 }"
+  if errorlevel 1 goto :failed
+  exit /b 0
+)
+
+if not exist "%ProgramData%\cc-remote\sessions\__ID__" mkdir "%ProgramData%\cc-remote\sessions\__ID__"
+if not exist "%ZIP%" (
+  echo ERROR: Expected bundle not found beside launcher: %ZIP%
+  goto :failed
+)
+echo [%date% %time%] Verifying offline bundle: %ZIP%
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$h=(Get-FileHash -Algorithm SHA256 -LiteralPath $env:ZIP).Hash.ToLowerInvariant(); if($h -ne $env:EXPECTED_SHA){throw ('Bundle SHA256 mismatch: ' + $h)}" >>"%LOG%" 2>&1
+if errorlevel 1 goto :failed
+
+echo [%date% %time%] Extracting bundle to "%ROOT%"...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "New-Item -ItemType Directory -Force -Path $env:ROOT | Out-Null; Expand-Archive -Force -Path $env:ZIP -DestinationPath $env:ROOT; $m=Get-Content (Join-Path $env:ROOT 'manifest.json') -Raw | ConvertFrom-Json; if($m.session_id -ne '__ID__'){throw 'Extracted manifest session_id mismatch'}" >>"%LOG%" 2>&1
+if errorlevel 1 goto :failed
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { & $env:ROOT\bootstrap.ps1 -NoMonitor *>&1 | Tee-Object -FilePath $env:LOG -Append; if (-not $?) { exit 1 } } catch { $_ | Out-String | Tee-Object -FilePath $env:LOG -Append; exit 1 }"
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" goto :bootstrap_failed
+
+echo cc-remote setup finished successfully.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\bootstrap.ps1" -MonitorOnly
+set "RC=%ERRORLEVEL%"
+goto :hold
+
+:bootstrap_failed
+echo ERROR: cc-remote bootstrap failed with exit code %RC%.
+echo Review or send this log to the operator: %LOG%
+goto :hold
+
+:failed
+echo ERROR: cc-remote launcher could not complete setup.
+echo If a log was created, it is at: %LOG%
+
+:hold
+echo.
+pause
+exit /b %RC%
+`
+	cmd := strings.NewReplacer("__ID__", id, "__BUNDLE__", bundleName, "__SHA__", bundleSHA256).Replace(cmdTemplate)
+	ps := fmt.Sprintf(`# cc-remote Windows bootstrap. Run in PowerShell as Administrator with %[2]s beside this file.
+$ErrorActionPreference = 'Stop'
+$SelfDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root = Join-Path $env:TEMP 'cc-remote-%[1]s'
+$Zip = Join-Path $SelfDir '%[2]s'
+$ExpectedSHA = '%[3]s'
+$Log = Join-Path $env:ProgramData 'cc-remote\sessions\%[1]s\bootstrap.log'
+New-Item -ItemType Directory -Force -Path $Root, (Split-Path -Parent $Log) | Out-Null
+if (-not (Test-Path -LiteralPath $Zip -PathType Leaf)) { throw "Expected bundle not found beside launcher: $Zip" }
+$Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $Zip).Hash.ToLowerInvariant()
+if ($Hash -ne $ExpectedSHA) { throw "Bundle SHA256 mismatch: $Hash" }
+Expand-Archive -Force -Path $Zip -DestinationPath $Root
+$Manifest = Get-Content (Join-Path $Root 'manifest.json') -Raw | ConvertFrom-Json
+if ($Manifest.session_id -ne '%[1]s') { throw 'Extracted manifest session_id mismatch.' }
+& (Join-Path $Root 'bootstrap.ps1') -NoMonitor *>&1 | Tee-Object -FilePath $Log -Append
+if (-not $?) { throw 'cc-remote setup failed; monitor was not started.' }
+& (Join-Path $Root 'bootstrap.ps1') -MonitorOnly
+`, id, bundleName, bundleSHA256)
+	shTemplate := `#!/bin/sh
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec /bin/bash "$0" "$@"
+fi
+set -Eeuo pipefail
+
+session_id="__ID__"
+self_dir="$(cd "$(dirname "$0")" && pwd)"
+root="${TMPDIR:-/tmp}/cc-remote-$session_id"
+zip="$self_dir/__BUNDLE__"
+expected_sha="__SHA__"
+log_dir="/var/tmp/cc-remote/$session_id"
+log="$log_dir/bootstrap.log"
+stage="launcher initialization"
+rc=1
+
+stamp() { date '+%Y-%m-%d %H:%M:%S'; }
+log_line() { printf '[%s] %s\n' "$(stamp)" "$*"; }
+hold_on_failure() { if [ -t 0 ]; then printf '\nPress Return to close this window...'; IFS= read -r _ || true; fi; }
+on_error() { local code="$1" line="$2"; trap - ERR; log_line "ERROR: launcher failed during '$stage' (line $line, exit $code)." >&2; log_line "Persistent log: $log" >&2; hold_on_failure; exit "$code"; }
+trap 'on_error $? $LINENO' ERR
+
+if [ "$(uname -s)" != "Darwin" ] && [ "$(uname -s)" != "Linux" ]; then log_line "ERROR: unsupported operating system: $(uname -s)" >&2; hold_on_failure; exit 1; fi
+if [ "$(id -u)" -ne 0 ]; then log_line "Requesting administrator privileges. Enter this Mac's login password once."; exec sudo /bin/bash "$0" --elevated; fi
+mkdir -p "$log_dir" "$root"
+chmod 700 "$log_dir"
+touch "$log"
+chmod 600 "$log"
+log_pipe="$root/launcher-output.pipe"
+rm -f "$log_pipe"
+mkfifo "$log_pipe"
+tee -a "$log" < "$log_pipe" &
+tee_pid=$!
+trap 'rm -f "$log_pipe"; kill "$tee_pid" >/dev/null 2>&1 || true' EXIT
+exec > "$log_pipe" 2>&1
+
+stage="verifying bundle"
+[ -f "$zip" ] || { log_line "ERROR: expected bundle not found beside launcher: $zip" >&2; false; }
+actual_sha="$(shasum -a 256 "$zip" | cut -d' ' -f1)"
+[ "$actual_sha" = "$expected_sha" ] || { log_line "ERROR: bundle SHA256 mismatch: $actual_sha" >&2; false; }
+stage="extracting bundle"
+command -v unzip >/dev/null 2>&1 || { log_line "ERROR: unzip is required." >&2; false; }
+unzip -o "$zip" -d "$root" >/dev/null
+manifest_session="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("session_id", ""))' "$root/manifest.json")"
+[ "$manifest_session" = "$session_id" ] || { log_line "ERROR: extracted manifest session_id mismatch." >&2; false; }
+chmod 700 "$root/bootstrap.sh" "$root/cleanup.sh" "$root/idle-watch.sh"
+stage="running bootstrap"
+CC_REMOTE_LOG="$log" /bin/bash "$root/bootstrap.sh"
+rc=$?
+if [ "$rc" -eq 0 ]; then log_line "cc-remote bootstrap finished."; else log_line "ERROR: bootstrap exited with code $rc. Log: $log" >&2; hold_on_failure; fi
+exit "$rc"
+`
+	sh := strings.NewReplacer("__ID__", id, "__BUNDLE__", bundleName, "__SHA__", bundleSHA256).Replace(shTemplate)
+	if cmdPath != "" {
+		if err := os.WriteFile(cmdPath, []byte(cmd), 0o600); err != nil {
+			return err
+		}
+	}
+	if ps1Path != "" {
+		if err := os.WriteFile(ps1Path, []byte(ps), 0o600); err != nil {
+			return err
+		}
+	}
+	if shPath != "" {
+		if err := os.WriteFile(shPath, []byte(sh), 0o700); err != nil {
+			return err
+		}
+	}
+	if commandPath != "" {
+		return os.WriteFile(commandPath, []byte(sh), 0o700)
+	}
+	return nil
 }
 
 func writeHandoffScripts(bundlePath, cmdPath, ps1Path, shPath, commandPath, id string) error {
@@ -1004,13 +1540,13 @@ func findAssetRoot() (string, error) {
 	return "", errors.New("could not locate bootstrap assets; run from the cc-remote project directory or place bootstrap/ next to the binary")
 }
 
-func sshKeygen(path, comment string) error {
+func sshKeygen(path, comment string, stdout, stderr io.Writer) error {
 	if _, err := exec.LookPath("ssh-keygen"); err != nil {
 		return errors.New("ssh-keygen not found")
 	}
 	cmd := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", comment, "-f", path)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	return cmd.Run()
 }
 

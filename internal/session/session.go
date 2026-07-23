@@ -38,6 +38,9 @@ type Record struct {
 	RelayAuthKey       string     `json:"relay_authorized_key_line"`
 	RelayInstalled     bool       `json:"relay_installed"`
 	RelayInstallCmd    string     `json:"relay_install_cmd"`
+	BundleSHA256       string     `json:"bundle_sha256,omitempty"`
+	LauncherFormat     string     `json:"launcher_format,omitempty"`
+	HandoffMode        string     `json:"handoff_mode,omitempty"`
 }
 
 func NewID() (string, error) {

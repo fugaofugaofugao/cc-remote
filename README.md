@@ -27,6 +27,79 @@ Read [SECURITY.md](SECURITY.md) before use.
 
 ## Install and build
 
+Recommended install-and-use releases are portable runtime archives from
+`https://github.com/fugaofugaofugao/cc-remote/releases`. Download the archive for
+your OS/architecture, verify its checksum, extract it, then run the included
+user-local installer.
+
+macOS Apple Silicon example:
+
+```sh
+VERSION=v0.2.0
+gh release download "$VERSION" --repo fugaofugaofugao/cc-remote \
+  --pattern "cc-remote_${VERSION}_darwin_arm64_full.zip*"
+shasum -a 256 -c "cc-remote_${VERSION}_darwin_arm64_full.zip.sha256"
+unzip "cc-remote_${VERSION}_darwin_arm64_full.zip"
+cd "cc-remote_${VERSION}_darwin_arm64_full"
+./install.sh
+"$HOME/.local/share/cc-remote/cc-remote" version
+"$HOME/.local/share/cc-remote/cc-remote" doctor --json
+```
+
+Linux example:
+
+```sh
+VERSION=v0.2.0
+gh release download "$VERSION" --repo fugaofugaofugao/cc-remote \
+  --pattern "cc-remote_${VERSION}_linux_amd64_full.tar.gz*"
+shasum -a 256 -c "cc-remote_${VERSION}_linux_amd64_full.tar.gz.sha256"
+tar -xzf "cc-remote_${VERSION}_linux_amd64_full.tar.gz"
+cd "cc-remote_${VERSION}_linux_amd64_full"
+./install.sh
+"$HOME/.local/share/cc-remote/cc-remote" doctor --json
+```
+
+Windows PowerShell example:
+
+```powershell
+$Version = 'v0.2.0'
+gh release download $Version --repo fugaofugaofugao/cc-remote --pattern "cc-remote_${Version}_windows_amd64_full.zip*"
+$Expected = (Get-Content ".\cc-remote_${Version}_windows_amd64_full.zip.sha256").Split(' ')[0].ToLowerInvariant()
+$Actual = (Get-FileHash ".\cc-remote_${Version}_windows_amd64_full.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($Actual -ne $Expected) { throw "SHA256 mismatch: $Actual" }
+Expand-Archive ".\cc-remote_${Version}_windows_amd64_full.zip"
+cd ".\cc-remote_${Version}_windows_amd64_full"
+.\install.ps1 -AddToPath
+& "$env:LOCALAPPDATA\Programs\cc-remote\cc-remote.exe" version
+& "$env:LOCALAPPDATA\Programs\cc-remote\cc-remote.exe" doctor --json
+```
+
+The runtime installers copy the CLI plus `bootstrap/`, `payloads/`, and docs into
+a user-local app directory. They do not create sessions, keys, relay
+authorization, services, or `~/.cc-remote` records.
+
+For source development:
+
+```sh
+git clone https://github.com/fugaofugaofugao/cc-remote.git
+cd cc-remote
+./scripts/test.sh
+./scripts/build.sh
+# or during development:
+go run ./cmd/cc-remote --help
+```
+
+For Windows launchers, full runtime and self-contained source archives include
+the pinned Win32-OpenSSH payload. A source-only checkout intentionally omits that
+payload; prepare it before creating Windows launchers:
+
+```sh
+./scripts/prepare-windows-openssh.sh
+./scripts/test.sh
+```
+
+## Install and build from source
+
 Clone the repository or extract one of the release source archives, then work from its root:
 
 ```sh

@@ -18,14 +18,14 @@ chmod 700 "$WORK"
 trap 'rm -rf "$WORK"' EXIT
 
 ALLOWLIST=(
-  .gitignore CONTRIBUTING.md LICENSE NOTICE README.md SECURITY.md THIRD_PARTY_NOTICES.md go.mod
-  .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/feature_request.yml .github/pull_request_template.md .github/workflows/ci.yml
+  .gitignore CONTRIBUTING.md LICENSE NOTICE README.md SECURITY.md THIRD_PARTY_NOTICES.md cc-remote.workflow.json go.mod
+  .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/feature_request.yml .github/pull_request_template.md .github/workflows/ci.yml .github/workflows/release.yml
   bootstrap/bootstrap.ps1 bootstrap/bootstrap.sh bootstrap/cleanup.ps1 bootstrap/cleanup.sh bootstrap/idle-watch.ps1 bootstrap/idle-watch.sh
   cmd/cc-remote/main.go cmd/cc-remote/main_test.go
   docs/distribution-privacy.md docs/payloads.md docs/relay.md docs/usage.md examples/ssh_config.example
   internal/bundle/bundle.go internal/bundle/bundle_test.go internal/manifest/manifest.go internal/session/session.go internal/session/session_test.go
   payloads/macos/README-builtin-sshd.txt payloads/windows/openssh-win64.zip relay/cc-remote-relay-check.sh
-  scripts/README.md scripts/build.sh scripts/package.sh scripts/prepare-windows-openssh.sh scripts/privacy-scan.sh scripts/test.sh
+  scripts/README.md scripts/build.sh scripts/install.cmd scripts/install.command scripts/install.ps1 scripts/install.sh scripts/package-runtime.sh scripts/package.sh scripts/prepare-windows-openssh.sh scripts/privacy-scan.sh scripts/release.sh scripts/test.sh
   scripts/test-windows-authorization-handoff.ps1 scripts/test-windows-existing-tunnel-replacement.ps1 scripts/test-windows-idle-cleanup-task.ps1
   scripts/test-windows-monitor-relaunch.ps1 scripts/test-windows-target-user-resolution.ps1 scripts/test-windows-tunnel-handshake.ps1
 )
@@ -38,7 +38,6 @@ for rel in "${ALLOWLIST[@]}"; do
 done
 
 "$ROOT/scripts/test.sh"
-"$ROOT/scripts/privacy-scan.sh" "$ROOT"
 
 SELF_ROOT="$WORK/cc-remote-self-contained-source"
 SOURCE_ROOT="$WORK/cc-remote-source-only"

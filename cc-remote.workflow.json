@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "repo": "fugaofugaofugao/cc-remote",
+  "release_url": "https://github.com/fugaofugaofugao/cc-remote/releases",
+  "asset_templates": {
+    "macos": "cc-remote_${release_version}_darwin_${arch}_full.zip",
+    "linux": "cc-remote_${release_version}_linux_${arch}_full.tar.gz",
+    "windows": "cc-remote_${release_version}_windows_${arch}_full.zip"
+  },
+  "default_task": "create-session",
+  "tasks": {
+    "install": {
+      "required_inputs": ["os", "arch", "release_version"],
+      "download": "gh release download ${release_version} --repo fugaofugaofugao/cc-remote --pattern '<asset>*'",
+      "verify_first": ["SHA256SUMS.txt", "per-asset .sha256"],
+      "commands_after_extract": {
+        "macos": ["./install.sh", "$HOME/.local/share/cc-remote/cc-remote doctor --json"],
+        "linux": ["./install.sh", "$HOME/.local/share/cc-remote/cc-remote doctor --json"],
+        "windows": [".\\install.ps1 -AddToPath", "& $env:LOCALAPPDATA\\Programs\\cc-remote\\cc-remote.exe doctor --json"]
+      },
+      "mutates": ["user-local install directory", "optional user PATH"],
+      "does_not_mutate": ["relay", "sshd", "~/.cc-remote sessions", "keys"]
+    },
+    "create-session": {
+      "required_inputs": ["platform", "relay_host", "relay_user", "idle_timeout", "max_lifetime"],
+      "preflight": [{"cmd": ["cc-remote", "doctor", "--json"], "must_pass": true}],
+      "default_flags": {"--install-relay": false, "--target-user": "auto", "--launcher-format": "default", "--handoff-mode": "embedded"},
+      "single_launcher_defaults": {"windows": "cmd", "macos": "command", "linux": "sh"},
+      "requires_explicit_approval": ["--install-relay=true", "relay mutation", "controlled-side cleanup"],
+      "machine_output": {"flag": "--json", "stdout": "pure JSON only", "secret_policy": "private-key paths and public fingerprints only; never private-key bodies"},
+      "ready_acceptance": {"must_start_with": "CC_REMOTE_READY ", "must_match_session_record": true, "must_not_construct": true}
+    }
+  }
+}

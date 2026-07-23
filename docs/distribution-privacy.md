@@ -58,3 +58,16 @@ The self-contained archive includes the exact upstream Win32-OpenSSH ZIP recorde
 ## Recipient responsibilities
 
 A recipient must configure a public Linux/OpenSSH relay they control and explicitly supply its endpoint. The release contains no server, account, DNS record, or provider configuration. Relay authorization installation is manual by default; automatic installation requires explicit opt-in and a recipient-owned administrative SSH destination.
+
+## Install-and-use runtime archives
+
+Runtime archives are built from an explicit allowlist, not by zipping a working
+tree. They may contain the public CLI binary, bootstrap scripts, docs, installers,
+and the pinned Win32-OpenSSH payload for offline Windows support.
+
+Runtime archives and installers must never contain generated sessions, launchers,
+private or public session keys, records, logs, SSH configs, known-host files,
+connection metadata, relay-specific hostnames, fixed ports, or deployment
+fixtures. Installers are user-local only: they copy reusable code/assets and may
+create a command shim or update the user PATH, but they do not create sessions,
+keys, relay authorization, services, or `~/.cc-remote` records.

@@ -7,8 +7,10 @@ All scripts operate on the repository or on explicit paths. Generated session ma
 Build the CLI into `dist/`. Optional environment variables:
 
 ```sh
-GOOS=windows GOARCH=amd64 ./scripts/build.sh
+GOOS=windows GOARCH=amd64 VERSION=v0.2.0 ./scripts/build.sh
 ```
+
+`VERSION`, `COMMIT`, and `DATE` are embedded into `cc-remote version` when provided.
 
 ## `test.sh`
 
@@ -23,6 +25,26 @@ CC_REMOTE_PRIVACY_DENYLIST=/path/to/private-denylist.txt ./scripts/privacy-scan.
 ```
 
 The scanner treats security-test assertions that mention a private-key header as source tests, but rejects an actual PEM/OpenSSH private-key block.
+
+## `install.sh`, `install.command`, `install.ps1`, `install.cmd`
+
+Install an already extracted runtime archive into a user-local app directory. The installers copy the portable tree, create a command shim, and print `cc-remote version` / `cc-remote doctor --json` verification commands. They do not create sessions, keys, relay authorization, services, or `~/.cc-remote` records.
+
+## `package-runtime.sh`
+
+Builds one install-and-use runtime archive for a specific `--goos` / `--goarch` target. Runtime archives include the CLI executable, bootstrap assets, docs, user-local installers, and the pinned Win32-OpenSSH payload for offline Windows launcher generation.
+
+```sh
+./scripts/package-runtime.sh --output /path/to/output --version v0.2.0 --goos darwin --goarch arm64
+```
+
+## `release.sh`
+
+Runs tests, builds privacy-safe source archives, builds the macOS/Linux/Windows runtime archive matrix, and writes `SHA256SUMS.txt` plus `release-manifest.txt`.
+
+```sh
+./scripts/release.sh /path/to/output v0.2.0
+```
 
 ## `package.sh`
 
