@@ -1017,7 +1017,7 @@ func applyRelayDefaults(fs *flag.FlagSet, relayHost *string, relayPort *int, rel
 
 func relay(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cc-remote relay set|show|doctor|clear")
+		return errors.New("usage: cc-remote relay set|show|doctor|bootstrap|clear")
 	}
 	switch args[0] {
 	case "set":
@@ -1026,10 +1026,12 @@ func relay(args []string) error {
 		return relayShow(args[1:])
 	case "doctor":
 		return relayDoctor(args[1:])
+	case "bootstrap":
+		return relayBootstrap(args[1:])
 	case "clear":
 		return relayClear(args[1:])
 	default:
-		return fmt.Errorf("unknown relay command %q: use set, show, doctor, or clear", args[0])
+		return fmt.Errorf("unknown relay command %q: use set, show, doctor, bootstrap, or clear", args[0])
 	}
 }
 
@@ -1140,6 +1142,141 @@ func relayDoctor(args []string) error {
 	fmt.Println("- User:", cfg.DefaultRelay.User)
 	fmt.Println("This validates the saved operator profile only. Verify sshd/GatewayPorts on the relay host separately with docs/relay.md.")
 	return nil
+}
+
+type relayBootstrapResult struct {
+	OK          bool         `json:"ok"`
+	Configured  bool         `json:"configured"`
+	ConfigPath  string       `json:"config_path"`
+	Relay       relayProfile `json:"default_relay"`
+	AdminTarget string       `json:"admin_target"`
+	Mutated     bool         `json:"mutated"`
+	Saved       bool         `json:"saved"`
+}
+
+func relayBootstrap(args []string) error {
+	fs := flag.NewFlagSet("relay bootstrap", flag.ExitOnError)
+	adminTarget := fs.String("admin-target", "", "administrative SSH destination for the relay, for example root@relay.example.test or an SSH alias")
+	publicHost := fs.String("host", "", "public relay hostname or address controlled machines dial")
+	publicPort := fs.Int("port", 22, "public relay SSH port")
+	relayUser := fs.String("user", "cc-tunnel", "dedicated relay tunnel user")
+	identityFile := fs.String("identity-file", "", "optional administrative SSH private-key path; private-key contents are never stored")
+	sshPort := fs.Int("ssh-port", 0, "optional administrative SSH port; defaults to --port when --admin-target is a host")
+	yes := fs.Bool("yes", false, "confirm this command may mutate the authorized relay host")
+	noSave := fs.Bool("no-save", false, "configure the relay but do not save it as the default profile")
+	jsonOutput := fs.Bool("json", false, "print machine-readable result")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	*adminTarget = strings.TrimSpace(*adminTarget)
+	profile := relayProfile{Host: strings.TrimSpace(*publicHost), Port: *publicPort, User: strings.TrimSpace(*relayUser)}
+	if *identityFile == "" && *sshPort == 0 {
+		profile.SSHHost = *adminTarget
+	}
+	if err := validateRelayProfile(profile, true); err != nil {
+		return err
+	}
+	if *adminTarget == "" {
+		return errors.New("--admin-target is required; provide an administrative SSH destination for the relay you control")
+	}
+	if strings.HasPrefix(*adminTarget, "-") || strings.ContainsAny(*adminTarget, " \t\r\n") {
+		return errors.New("invalid --admin-target: use an SSH host alias or user@host without whitespace or leading dashes")
+	}
+	if *identityFile != "" && strings.ContainsAny(*identityFile, "\r\n") {
+		return errors.New("invalid --identity-file: newlines are not allowed")
+	}
+	if (*identityFile != "" || *sshPort != 0) && !*noSave {
+		return errors.New("--identity-file or --ssh-port requires --no-save; create an SSH alias for non-default admin access and use that alias as --admin-target before saving")
+	}
+	if *sshPort < 0 || *sshPort > 65535 {
+		return fmt.Errorf("invalid --ssh-port %d: use a port from 1 to 65535", *sshPort)
+	}
+	if !*yes {
+		return errors.New("refusing to mutate a relay without --yes; confirm this exact relay host is authorized")
+	}
+
+	sshArgs := []string{"-o", "ConnectTimeout=15"}
+	if *identityFile != "" {
+		sshArgs = append(sshArgs, "-o", "BatchMode=yes", "-i", *identityFile)
+	}
+	if *sshPort == 0 && *identityFile == "" {
+		sshArgs = append(sshArgs, "-tt")
+	}
+	port := *sshPort
+	if port == 0 && strings.Contains(*adminTarget, "@") {
+		port = *publicPort
+	}
+	if port != 0 {
+		sshArgs = append(sshArgs, "-p", strconv.Itoa(port))
+	}
+	sshArgs = append(sshArgs, "--", *adminTarget, relayBootstrapScript(profile.User))
+	cmd := exec.Command("ssh", sshArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("bootstrap relay over SSH: %w", err)
+	}
+	path := ""
+	if !*noSave {
+		var err error
+		path, err = writeAppConfig(appConfig{DefaultRelay: profile})
+		if err != nil {
+			return err
+		}
+	}
+	res := relayBootstrapResult{OK: true, Configured: !*noSave, ConfigPath: path, Relay: profile, AdminTarget: *adminTarget, Mutated: true, Saved: !*noSave}
+	if *jsonOutput {
+		return printJSON(res)
+	}
+	fmt.Println("Relay bootstrap completed:", *adminTarget)
+	if *noSave {
+		fmt.Println("Default relay profile was not saved because --no-save was set.")
+	} else {
+		fmt.Println("Saved default relay profile:", path)
+		fmt.Printf("Relay endpoint: %s:%d\n", profile.Host, profile.Port)
+		fmt.Println("Relay user:", profile.User)
+	}
+	return nil
+}
+
+func relayBootstrapScript(user string) string {
+	return fmt.Sprintf(`set -eu
+if ! command -v sudo >/dev/null 2>&1; then echo 'sudo is required on the relay' >&2; exit 1; fi
+if ! id %[1]s >/dev/null 2>&1; then sudo useradd --system --create-home --shell /usr/sbin/nologin %[1]s; fi
+home=$(getent passwd %[1]s | cut -d: -f6)
+shell=$(getent passwd %[1]s | cut -d: -f7)
+if [ -z "$home" ]; then echo 'cannot resolve relay user home' >&2; exit 1; fi
+case "$shell" in */nologin|*/false) ;; *) echo 'relay user %[1]s exists but has an interactive shell; review the account before bootstrap' >&2; exit 1 ;; esac
+sudo install -d -m 700 -o %[1]s -g %[1]s "$home/.ssh"
+sudo touch "$home/.ssh/authorized_keys"
+sudo chown %[1]s:%[1]s "$home/.ssh/authorized_keys"
+sudo chmod 600 "$home/.ssh/authorized_keys"
+if sudo grep -q '^# cc-remote relay bootstrap begin %[1]s$' /etc/ssh/sshd_config; then
+  :
+elif sudo grep -Eq '^Match[[:space:]]+' /etc/ssh/sshd_config; then
+  echo 'existing sshd Match block found; review sshd_config manually before bootstrap' >&2
+  exit 1
+else
+  sudo tee -a /etc/ssh/sshd_config >/dev/null <<'EOF'
+
+# cc-remote relay bootstrap begin %[1]s
+Match User %[1]s
+  PasswordAuthentication no
+  PermitTTY no
+  X11Forwarding no
+  AllowTcpForwarding yes
+  GatewayPorts no
+# cc-remote relay bootstrap end %[1]s
+EOF
+fi
+sudo sshd -t
+if command -v systemctl >/dev/null 2>&1; then
+  sudo systemctl reload sshd 2>/dev/null || sudo systemctl reload ssh 2>/dev/null || sudo service ssh reload 2>/dev/null || sudo service sshd reload 2>/dev/null
+else
+  sudo service ssh reload 2>/dev/null || sudo service sshd reload 2>/dev/null
+fi
+printf 'CC_REMOTE_RELAY_READY %[1]s\n'
+`, user)
 }
 
 func relayClear(args []string) error {

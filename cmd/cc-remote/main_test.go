@@ -195,6 +195,49 @@ func TestExplicitCreateIgnoresInvalidSavedRelay(t *testing.T) {
 	}
 }
 
+func TestRelayBootstrapRequiresExplicitApproval(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	err := run([]string{"cc-remote", "relay", "bootstrap", "--admin-target", "root@relay.example.test", "--host", "relay.example.test", "--port", "22", "--user", "cc-tunnel"})
+	if err == nil || !strings.Contains(err.Error(), "--yes") {
+		t.Fatalf("expected --yes approval requirement, got %v", err)
+	}
+}
+
+func TestRelayBootstrapRejectsUnsafeAdminTarget(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	err := run([]string{"cc-remote", "relay", "bootstrap", "--admin-target", "-oProxyCommand=bad", "--host", "relay.example.test", "--port", "22", "--user", "cc-tunnel", "--yes"})
+	if err == nil || !strings.Contains(err.Error(), "invalid --admin-target") {
+		t.Fatalf("expected unsafe admin target rejection, got %v", err)
+	}
+}
+
+func TestRelayBootstrapRawPortOrIdentityRequiresNoSave(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, args := range [][]string{
+		{"cc-remote", "relay", "bootstrap", "--admin-target", "root@relay.example.test", "--ssh-port", "39022", "--host", "relay.example.test", "--port", "22", "--user", "cc-tunnel", "--yes"},
+		{"cc-remote", "relay", "bootstrap", "--admin-target", "root@relay.example.test", "--identity-file", "~/.ssh/relay_admin_ed25519", "--host", "relay.example.test", "--port", "22", "--user", "cc-tunnel", "--yes"},
+	} {
+		err := run(args)
+		if err == nil || !strings.Contains(err.Error(), "requires --no-save") {
+			t.Fatalf("expected --no-save requirement, got %v", err)
+		}
+	}
+}
+
+func TestRelayBootstrapScriptKeepsLoopbackAndReloads(t *testing.T) {
+	script := relayBootstrapScript("cc-tunnel")
+	for _, want := range []string{"GatewayPorts no", "AllowTcpForwarding yes", "PermitTTY no", "sudo sshd -t", "reload sshd", "CC_REMOTE_RELAY_READY cc-tunnel"} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("relay bootstrap script missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"systemctl restart", "service ssh restart", "GatewayPorts yes", "0.0.0.0"} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("relay bootstrap script contains forbidden %q", forbidden)
+		}
+	}
+}
+
 func TestCreateWithoutRelayExplainsRelaySet(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	err := run([]string{"cc-remote", "create", "--name", "missing-relay", "--platform", "macos", "--launcher-format", "command", "--install-relay=false", "--payload-root", t.TempDir()})

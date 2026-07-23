@@ -1,27 +1,27 @@
 {
   "version": 1,
   "repo": "fugaofugaofugao/cc-remote",
-  "release_url": "https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.2.1",
+  "release_url": "https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.2.2",
   "direct_downloads": {
     "windows_amd64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_windows_amd64_full.zip",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_windows_amd64_full.zip.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.2/cc-remote_v0.2.2_windows_amd64_full.zip",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.2/cc-remote_v0.2.2_windows_amd64_full.zip.sha256"
     },
     "darwin_arm64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_arm64_full.zip",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_arm64_full.zip.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.2/cc-remote_v0.2.2_darwin_arm64_full.zip",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.2/cc-remote_v0.2.2_darwin_arm64_full.zip.sha256"
     },
     "darwin_amd64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_amd64_full.zip",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_amd64_full.zip.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.2/cc-remote_v0.2.2_darwin_amd64_full.zip",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.2/cc-remote_v0.2.2_darwin_amd64_full.zip.sha256"
     },
     "linux_amd64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_amd64_full.tar.gz",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_amd64_full.tar.gz.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.2/cc-remote_v0.2.2_linux_amd64_full.tar.gz",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.2/cc-remote_v0.2.2_linux_amd64_full.tar.gz.sha256"
     },
     "linux_arm64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_arm64_full.tar.gz",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_arm64_full.tar.gz.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.2/cc-remote_v0.2.2_linux_arm64_full.tar.gz",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.2/cc-remote_v0.2.2_linux_arm64_full.tar.gz.sha256"
     }
   },
   "default_task": "create-session",
@@ -39,16 +39,18 @@
     },
     "configure-relay-once": {
       "required_inputs": ["relay_host", "relay_ssh_port", "relay_user"],
-      "optional_inputs": ["relay_admin_ssh_alias"],
+      "optional_inputs": ["relay_admin_ssh_alias", "relay_admin_ssh_port", "relay_admin_identity_file"],
       "commands": [
+        "cc-remote relay bootstrap --admin-target <relay_admin_ssh_alias_or_user_at_host> --host <relay_host> --port <relay_ssh_port> --user <relay_user> --yes",
+        "cc-remote relay bootstrap --admin-target <relay_admin_user_at_host> --ssh-port <relay_admin_ssh_port> --identity-file <relay_admin_identity_file> --host <relay_host> --port <relay_ssh_port> --user <relay_user> --yes --no-save",
         "cc-remote init-relay --user cc-tunnel",
         "cc-remote relay set --host <relay_host> --port <relay_ssh_port> --user <relay_user> [--ssh-host <relay_admin_ssh_alias>]",
         "cc-remote relay show --json",
         "cc-remote relay doctor --json"
       ],
       "stores": "~/.cc-remote/config.json",
-      "secret_policy": "stores relay metadata only; never private-key bodies",
-      "requires_explicit_approval": ["editing relay sshd_config", "reloading relay sshd", "--install-relay=true"]
+      "secret_policy": "stores relay metadata only; never private-key bodies; never pass passwords as command-line flags",
+      "requires_explicit_approval": ["cc-remote relay bootstrap --yes", "editing relay sshd_config", "reloading relay sshd", "--install-relay=true"]
     },
     "create-session": {
       "required_inputs": ["platform", "idle_timeout", "max_lifetime"],

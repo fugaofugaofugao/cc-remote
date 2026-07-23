@@ -16,7 +16,39 @@ Use a dedicated account, normally `cc-tunnel`. Do not reuse a personal administr
 
 ## Save the relay profile once
 
-The relay host itself is a one-time infrastructure prerequisite. After it is prepared, save the operator-side default profile once:
+The relay host itself is a one-time infrastructure prerequisite. If the operator has administrative SSH access to the relay, bootstrap it directly after explicit authorization:
+
+```sh
+cc-remote relay bootstrap \
+  --admin-target root@relay.example.test \
+  --host relay.example.test \
+  --port 22 \
+  --user cc-tunnel \
+  --yes
+```
+
+If admin SSH needs a non-default port or identity file, create an SSH alias first and use that alias as `--admin-target` before saving the relay profile:
+
+```sshconfig
+Host support-relay-admin
+  HostName relay.example.test
+  Port 39022
+  User root
+  IdentityFile ~/.ssh/relay_admin_ed25519
+```
+
+```sh
+cc-remote relay bootstrap \
+  --admin-target support-relay-admin \
+  --host relay.example.test \
+  --port 22 \
+  --user cc-tunnel \
+  --yes
+```
+
+Direct `--ssh-port` or `--identity-file` bootstrap is allowed only with `--no-save`; otherwise later `--install-relay=true` would not know those raw SSH options. This creates/verifies the dedicated relay user, appends a safe `Match User` policy only when no existing matching block needs manual review, validates with `sshd -t`, reloads sshd, and saves the default relay profile. It never stores passwords or private-key bodies. If password login is the only available admin method, let SSH/sudo prompt interactively or first create an SSH alias/key through the user's approved method; do not pass passwords as command-line flags.
+
+Or save the operator-side default profile manually once:
 
 ```sh
 cc-remote relay set \
@@ -72,26 +104,35 @@ Required inputs:
 - Dedicated relay user, normally cc-tunnel.
 
 Steps:
-1. Run locally: cc-remote init-relay --user cc-tunnel
-2. Review the printed commands before applying them.
-3. On the relay, create/verify the dedicated cc-tunnel account with no password
+1. If administrative SSH access is available and the operator explicitly authorizes
+   relay mutation, run locally:
+   cc-remote relay bootstrap --admin-target <admin-ssh-destination-or-alias> --host <public-relay-endpoint> --port <public-relay-ssh-port> --user cc-tunnel --yes
+   For non-default admin ports or identity files that should be reused later, first
+   create an approved SSH alias and use the alias as --admin-target. Do not pass
+   passwords as command-line flags; let SSH/sudo prompt interactively or first create
+   an approved SSH alias/key.
+2. Otherwise run locally: cc-remote init-relay --user cc-tunnel
+3. Review the printed commands before applying them.
+4. On the relay, create/verify the dedicated cc-tunnel account with no password
    login and no interactive shell.
-4. Add an sshd_config Match block for that user:
+5. Add an sshd_config Match block for that user:
    Match User cc-tunnel
      PasswordAuthentication no
      PermitTTY no
      X11Forwarding no
      AllowTcpForwarding yes
      GatewayPorts no
-5. Validate with sudo sshd -t.
-6. Reload sshd with the platform-supported reload command. Prefer reload; do not
+6. Validate with sudo sshd -t.
+7. Reload sshd with the platform-supported reload command. Prefer reload; do not
    restart shared sshd unless the operator explicitly approves the risk.
-7. Do not add broad GatewayPorts/public listeners. cc-remote sessions must use
+8. Save the default relay profile once with cc-remote relay set, unless relay
+   bootstrap already saved it.
+9. Do not add broad GatewayPorts/public listeners. cc-remote sessions must use
    loopback-only reverse listeners: 127.0.0.1:<port>.
-8. After cc-remote create --json prints relay_authorized_key_line, append that
-   exact line to ~cc-tunnel/.ssh/authorized_keys, preserving unrelated lines.
-9. Never remove unrelated authorized_keys entries. Cleanup may remove only the
-   exact cc-remote:<session-id> marker for that session.
+10. After cc-remote create --json prints relay_authorized_key_line, append that
+    exact line to ~cc-tunnel/.ssh/authorized_keys, preserving unrelated lines.
+11. Never remove unrelated authorized_keys entries. Cleanup may remove only the
+    exact cc-remote:<session-id> marker for that session.
 ```
 
 ## Create the dedicated account
