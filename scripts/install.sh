@@ -84,4 +84,4 @@ if [ "$make_shim" -eq 1 ]; then
     *) printf 'NOTE: %s is not on PATH. Add it to your shell profile or run the shim by full path.\n' "$bin_dir" ;;
   esac
 fi
-printf '\nVerify with:\n  cc-remote version\n  cc-remote doctor --json\n'
+printf '\nVerify with:\n  cc-remote version\n  cc-remote doctor --json\n\nBefore cc-remote create, configure the relay you control:\n  cc-remote relay set --host <relay-host> --port <relay-ssh-port> --user cc-tunnel\nIf relay details are missing, ask the operator before creating a session.\n'

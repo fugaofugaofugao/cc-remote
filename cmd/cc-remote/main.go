@@ -131,7 +131,7 @@ func create(args []string) error {
 	*relayHost = strings.TrimSpace(*relayHost)
 	*relaySSHHost = strings.TrimSpace(*relaySSHHost)
 	if *relayHost == "" {
-		return errors.New("--relay-host is required; run cc-remote relay set --host <relay-host> --port <relay-ssh-port> --user cc-tunnel once, or pass --relay-host explicitly")
+		return errors.New("--relay-host is required and no saved relay profile exists. Ask the operator for the relay public host/IP, SSH port, and dedicated relay user, then run cc-remote relay set --host <relay-host> --port <relay-ssh-port> --user cc-tunnel once, or pass --relay-host explicitly")
 	}
 	if err := validateRelayUser(*relayUser); err != nil {
 		return err
@@ -143,7 +143,7 @@ func create(args []string) error {
 		return fmt.Errorf("invalid --remote-port %d: use 0 for automatic selection or a port from 1 to 65535", *remotePort)
 	}
 	if *installRelay && *relaySSHHost == "" {
-		return errors.New("--relay-ssh-host is required with --install-relay; it must name your administrative SSH destination")
+		return errors.New("--relay-ssh-host is required with --install-relay. Ask the operator for an explicitly authorized relay administrative SSH alias/destination, or omit --install-relay and install relay_authorized_key_line manually")
 	}
 	if *targetUser == "" {
 		*targetUser = autoTargetUser

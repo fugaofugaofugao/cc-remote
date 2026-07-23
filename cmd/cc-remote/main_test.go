@@ -241,8 +241,8 @@ func TestRelayBootstrapScriptKeepsLoopbackAndReloads(t *testing.T) {
 func TestCreateWithoutRelayExplainsRelaySet(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	err := run([]string{"cc-remote", "create", "--name", "missing-relay", "--platform", "macos", "--launcher-format", "command", "--install-relay=false", "--payload-root", t.TempDir()})
-	if err == nil || !strings.Contains(err.Error(), "cc-remote relay set") {
-		t.Fatalf("expected relay set guidance, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "Ask the operator") || !strings.Contains(err.Error(), "cc-remote relay set") {
+		t.Fatalf("expected ask-operator relay set guidance, got %v", err)
 	}
 	assertNoSessionArtifacts(t)
 }

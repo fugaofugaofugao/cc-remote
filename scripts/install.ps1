@@ -59,6 +59,10 @@ try {
   Write-Host 'Verify with:'
   Write-Host '  cc-remote version'
   Write-Host '  cc-remote doctor --json'
+  Write-Host ''
+  Write-Host 'Before cc-remote create, configure the relay you control:'
+  Write-Host '  cc-remote relay set --host <relay-host> --port <relay-ssh-port> --user cc-tunnel'
+  Write-Host 'If relay details are missing, ask the operator before creating a session.'
 } finally {
   if ($Temp -and (Test-Path -LiteralPath $Temp)) { Remove-Item -LiteralPath $Temp -Recurse -Force -ErrorAction SilentlyContinue }
 }
