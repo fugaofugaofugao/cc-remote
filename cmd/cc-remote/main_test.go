@@ -98,6 +98,112 @@ func TestNonWindowsCreateDoesNotRequireWindowsPayload(t *testing.T) {
 	}
 }
 
+func TestRelaySetShowAndCreateUsesSavedDefaults(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	out, err := captureStdout(t, func() error {
+		return run([]string{"cc-remote", "relay", "set", "--json", "--host", "relay.example.test", "--port", "39022", "--user", "cc-tunnel", "--ssh-host", "support-relay"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved relayShowResult
+	if err := json.Unmarshal([]byte(out), &saved); err != nil {
+		t.Fatalf("relay set --json did not print JSON: %v\n%s", err, out)
+	}
+	if !saved.OK || !saved.Configured || saved.Relay.Host != "relay.example.test" || saved.Relay.Port != 39022 || saved.Relay.User != "cc-tunnel" || saved.Relay.SSHHost != "support-relay" {
+		t.Fatalf("unexpected relay set result: %+v", saved)
+	}
+	info, err := os.Stat(saved.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("config mode = %o, want 600", info.Mode().Perm())
+	}
+	configBytes, err := os.ReadFile(saved.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(configBytes), "BEGIN OPENSSH PRIVATE KEY") {
+		t.Fatal("relay config contains private-key body material")
+	}
+	out, err = captureStdout(t, func() error {
+		return run([]string{"cc-remote", "relay", "show", "--json"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shown relayShowResult
+	if err := json.Unmarshal([]byte(out), &shown); err != nil {
+		t.Fatalf("relay show --json did not print JSON: %v\n%s", err, out)
+	}
+	if shown.Relay != saved.Relay {
+		t.Fatalf("relay show mismatch: got %+v want %+v", shown.Relay, saved.Relay)
+	}
+	if err := run([]string{"cc-remote", "create", "--name", "saved-relay", "--platform", "macos", "--launcher-format", "command", "--install-relay=false", "--payload-root", t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := onlySessionRecord(t)
+	if rec.RelayHost != "relay.example.test" || rec.RelaySSHPort != 39022 || rec.RelayUser != "cc-tunnel" || rec.RelaySSHHost != "support-relay" {
+		t.Fatalf("create did not use saved relay defaults: %+v", rec)
+	}
+}
+
+func TestCreateRelayFlagsOverrideSavedDefaults(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := run([]string{"cc-remote", "relay", "set", "--host", "relay.example.test", "--port", "39022", "--user", "cc-tunnel", "--ssh-host", "support-relay"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"cc-remote", "create", "--name", "override-relay", "--platform", "macos", "--launcher-format", "command", "--relay-host", "other.example.test", "--relay-port", "2222", "--relay-user", "other-tunnel", "--relay-ssh-host", "other-admin", "--install-relay=false", "--payload-root", t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := onlySessionRecord(t)
+	if rec.RelayHost != "other.example.test" || rec.RelaySSHPort != 2222 || rec.RelayUser != "other-tunnel" || rec.RelaySSHHost != "other-admin" {
+		t.Fatalf("explicit relay flags did not override saved defaults: %+v", rec)
+	}
+}
+
+func TestCreateRelayOverrideDoesNotReuseSavedAdminHost(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := run([]string{"cc-remote", "relay", "set", "--host", "relay.example.test", "--port", "39022", "--user", "cc-tunnel", "--ssh-host", "support-relay"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"cc-remote", "create", "--name", "override-relay-admin", "--platform", "macos", "--launcher-format", "command", "--relay-host", "other.example.test", "--install-relay=false", "--payload-root", t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := onlySessionRecord(t)
+	if rec.RelayHost != "other.example.test" || rec.RelaySSHHost != "" {
+		t.Fatalf("relay endpoint override reused saved admin host unsafely: %+v", rec)
+	}
+}
+
+func TestExplicitCreateIgnoresInvalidSavedRelay(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	base, err := session.EnsureDirs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "config.json"), []byte(`{"default_relay":{"host":"bad.example.test","port":70000,"user":"bad user"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"cc-remote", "create", "--name", "explicit-relay", "--platform", "macos", "--launcher-format", "command", "--relay-host", "good.example.test", "--relay-port", "22", "--relay-user", "cc-tunnel", "--install-relay=false", "--payload-root", t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := onlySessionRecord(t)
+	if rec.RelayHost != "good.example.test" || rec.RelaySSHPort != 22 || rec.RelayUser != "cc-tunnel" {
+		t.Fatalf("explicit relay flags were not honored: %+v", rec)
+	}
+}
+
+func TestCreateWithoutRelayExplainsRelaySet(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	err := run([]string{"cc-remote", "create", "--name", "missing-relay", "--platform", "macos", "--launcher-format", "command", "--install-relay=false", "--payload-root", t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "cc-remote relay set") {
+		t.Fatalf("expected relay set guidance, got %v", err)
+	}
+	assertNoSessionArtifacts(t)
+}
+
 func TestCreateJSONStdoutIsPureJSON(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	out, err := captureStdout(t, func() error {

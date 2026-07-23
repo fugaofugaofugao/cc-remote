@@ -2,57 +2,88 @@
 
 ## 1. Install the operator CLI
 
-For normal install-and-use operation, install a full runtime archive from the
-GitHub Release instead of cloning source code or running `go build`:
+For normal install-and-use operation, install a full runtime archive from the GitHub Release instead of cloning source code or running `go build`.
+
+Release page:
 
 ```text
-https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.2.0
+https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.2.1
 ```
 
-After extracting a runtime archive, run the included installer and verify with
-`cc-remote doctor --json`. The installer is user-local and does not create
-sessions, keys, relay authorization, services, or `~/.cc-remote` records.
+Direct runtime download links:
 
-For source development only:
+| Operator OS / arch | Runtime archive | SHA256 file |
+| --- | --- | --- |
+| Windows x86_64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_windows_amd64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_windows_amd64_full.zip.sha256 |
+| macOS Apple Silicon | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_arm64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_arm64_full.zip.sha256 |
+| macOS Intel | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_amd64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_amd64_full.zip.sha256 |
+| Linux x86_64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_amd64_full.tar.gz | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_amd64_full.tar.gz.sha256 |
+| Linux ARM64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_arm64_full.tar.gz | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_arm64_full.tar.gz.sha256 |
 
-```sh
-./scripts/build.sh
-```
+After extracting a runtime archive, run the included installer and verify with `cc-remote doctor --json`. The installer is user-local and does not create sessions, keys, relay authorization, services, or `~/.cc-remote` records.
 
-Use the installed `cc-remote` below, or during development use `./dist/cc-remote`.
-
-## 2. Prepare your public relay
+## 2. Prepare and save your public relay once
 
 Configure a Linux/OpenSSH relay you administer. Keep reverse forwarding loopback-only and use a dedicated `cc-tunnel` account. See [relay.md](relay.md).
 
+Save the default relay profile once on the operator machine:
+
+```sh
+cc-remote relay set \
+  --host relay.example.test \
+  --port 22 \
+  --user cc-tunnel
+```
+
+If you have an operator-side administrative SSH alias and want the option to explicitly install per-session relay authorization later, save it too:
+
+```sh
+cc-remote relay set \
+  --host relay.example.test \
+  --port 22 \
+  --user cc-tunnel \
+  --ssh-host support-relay-admin
+```
+
+Verify the saved profile:
+
+```sh
+cc-remote relay show --json
+cc-remote relay doctor --json
+```
+
+The profile is stored at `~/.cc-remote/config.json` with mode `0600`. It stores relay endpoint metadata only, never private-key bodies. Per-session keys and restricted relay authorization lines are still generated fresh every time.
+
 ## 3. Create a support session
 
+After `cc-remote relay set`, the relay flags are no longer repeated for normal session creation:
+
 ```sh
-./dist/cc-remote create \
+cc-remote create --json \
   --name support-session \
   --platform windows \
-  --relay-host relay.example.test \
-  --relay-port 22 \
-  --relay-user cc-tunnel \
+  --launcher-format cmd \
+  --handoff-mode embedded \
   --target-user auto \
-  --idle-timeout 2h \
-  --max-lifetime 168h
+  --idle-timeout 12h \
+  --max-lifetime 12h
 ```
 
-Replace the reserved example hostname with your relay. `--platform` accepts `windows`, `macos`, `linux`, or `all`.
+`--platform` accepts `windows`, `macos`, `linux`, or `all`. Single-platform launcher formats are `cmd` for Windows, `command` for macOS, and `sh` for Linux.
 
-The command creates fresh target and tunnel key pairs and writes operator artifacts under `~/.cc-remote/`. By default it prints a restricted relay authorization instead of changing the relay. Install that public line before the recipient launches the bundle.
+By default the command does not change the relay. It prints a restricted `relay_authorized_key_line`; install that exact line in the dedicated relay user's `authorized_keys`, preserving unrelated lines, before the recipient launches the bundle.
 
-Automatic installation is opt-in only:
+Automatic per-session relay authorization installation is opt-in only:
 
 ```sh
-./dist/cc-remote create \
+cc-remote create --json \
   --name support-session \
   --platform windows \
-  --relay-host relay.example.test \
-  --relay-ssh-host support-relay \
+  --launcher-format cmd \
   --install-relay=true
 ```
+
+`--install-relay=true` is not remembered as a default. Each relay mutation must be explicitly requested.
 
 ## 4. Run the controlled launcher
 
@@ -109,7 +140,7 @@ CC_REMOTE_READY <session-id> <target-user> <relay-host> <remote-port>
 Paste the complete exact line:
 
 ```sh
-./dist/cc-remote ready 'CC_REMOTE_READY <session-id> <target-user> <relay-host> <remote-port>'
+cc-remote ready 'CC_REMOTE_READY <session-id> <target-user> <relay-host> <remote-port>'
 ```
 
 The command rejects a relay host different from the configured record and rejects ports outside `1-65535`. Rejection does not rewrite connection artifacts.
@@ -117,9 +148,9 @@ The command rejects a relay host different from the configured record and reject
 ## 6. Inspect and connect
 
 ```sh
-./dist/cc-remote show support-session
-./dist/cc-remote list
-./dist/cc-remote ssh support-session
+cc-remote show support-session
+cc-remote list
+cc-remote ssh support-session
 ```
 
 Or:
@@ -142,7 +173,7 @@ Preferred controlled-side cleanup:
 Then close the operator record:
 
 ```sh
-./dist/cc-remote close support-session
+cc-remote close support-session
 ```
 
 Controlled-side cleanup may remove only the exact `cc-remote:<session-id>` key line, stop the exact verified tunnel process, and remove exact-session state. It must not stop, disable, uninstall, restart, or reconfigure shared `sshd`.
@@ -151,77 +182,47 @@ The operator CLI removes relay authorization only if it installed it. A manually
 
 ## AI prompt for install-and-use
 
-Copy this prompt when another AI/operator should install cc-remote and generate a
-single reusable launcher from the GitHub Release:
+Copy this prompt when another AI/operator should install cc-remote and generate a single reusable launcher from the GitHub Release:
 
 ```text
-Install and use cc-remote v0.2.0 from GitHub Release. Do not clone source code,
-do not run go build, and do not rewrite the launcher scripts.
+Install and use cc-remote v0.2.1 from GitHub Release. Do not clone source code, do not run go build, and do not rewrite the launcher scripts.
 
-Release:
-https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.2.0
+Release page:
+https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.2.1
 
-1. Detect the operator machine OS/architecture and download the matching full
-   runtime archive plus its .sha256 file:
-   - Windows x86_64: cc-remote_v0.2.0_windows_amd64_full.zip
-   - macOS Apple Silicon: cc-remote_v0.2.0_darwin_arm64_full.zip
-   - macOS Intel: cc-remote_v0.2.0_darwin_amd64_full.zip
-   - Linux x86_64: cc-remote_v0.2.0_linux_amd64_full.tar.gz
-   - Linux ARM64: cc-remote_v0.2.0_linux_arm64_full.tar.gz
-2. Verify SHA256 before extraction. Stop if verification fails.
-3. Extract and run the included installer:
-   - macOS/Linux: ./install.sh
-   - Windows: .\install.ps1 -AddToPath
-4. Verify the installed binary by deterministic path, not by guessing PATH:
-   - macOS/Linux: "$HOME/.local/share/cc-remote/cc-remote" doctor --json
-   - Windows: & "$env:LOCALAPPDATA\Programs\cc-remote\cc-remote.exe" doctor --json
-5. Continue only if doctor JSON has ok=true. If not, stop and report the JSON.
-6. Confirm there is a public Linux/OpenSSH relay server controlled by the
-   operator. You need: relay public host/IP, SSH port, and a dedicated relay user
-   such as cc-tunnel. If the relay is not configured yet, stop and ask for an
-   administrative SSH destination for that relay; do not invent one.
-7. Configure or verify the relay before creating a controlled-machine launcher:
-   - Run: cc-remote init-relay --user cc-tunnel
-   - Apply the printed Match User policy on the relay you control.
-   - Keep GatewayPorts no.
-   - Validate with sudo sshd -t and reload sshd; prefer reload, not restart.
-   - The relay user must have no password login and no interactive shell.
-8. Create one single-platform launcher with JSON output. By default this does not
-   modify the relay; it prints one restricted authorized_keys line that must be
-   installed for the dedicated relay user:
-   cc-remote create --json \
-     --name <target-name> \
-     --platform <windows|macos|linux> \
-     --launcher-format <cmd|command|sh> \
-     --handoff-mode embedded \
-     --relay-host <relay-host> \
-     --relay-port <relay-ssh-port> \
-     --relay-user cc-tunnel \
-     --target-user auto \
-     --idle-timeout 12h \
-     --max-lifetime 12h
+Download exactly one matching runtime archive plus its .sha256 file:
+- Windows x86_64:
+  https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_windows_amd64_full.zip
+  https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_windows_amd64_full.zip.sha256
+- macOS Apple Silicon:
+  https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_arm64_full.zip
+  https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_arm64_full.zip.sha256
+- macOS Intel:
+  https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_amd64_full.zip
+  https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_amd64_full.zip.sha256
+- Linux x86_64:
+  https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_amd64_full.tar.gz
+  https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_amd64_full.tar.gz.sha256
+- Linux ARM64:
+  https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_arm64_full.tar.gz
+  https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_arm64_full.tar.gz.sha256
 
-   Platform launcher formats:
-   - Windows: cmd
-   - macOS: command
-   - Linux: sh
-9. Install the exact relay_authorized_key_line from create --json into the relay
-   user's authorized_keys, preserving unrelated keys. Only use
-   --install-relay=true when the operator explicitly authorizes relay mutation
-   and provides --relay-ssh-host.
-10. Send only files listed in share_with_recipient to the authorized controlled
-    machine. Do not send files listed in operator_only.
-11. Never print, copy, upload, or paste private-key bodies. Key information means
-    operator-side private-key paths and public-key fingerprints only.
-12. Accept only the complete READY line emitted by the controlled launcher after
-    verification:
-    CC_REMOTE_READY <session-id> <target-user> <relay-host> <remote-port>
-    Never invent or construct READY.
-13. Register READY on the operator machine:
-    cc-remote ready 'CC_REMOTE_READY ...'
-14. Start with read-only checks only, such as hostname, current user, and OS
-    version. Do not modify the controlled machine until that exact work is
-    authorized.
+Steps:
+1. Verify SHA256 before extraction. Stop if verification fails.
+2. Extract and run the included installer: macOS/Linux ./install.sh; Windows .\install.ps1 -AddToPath.
+3. Verify the installed binary by deterministic path: macOS/Linux "$HOME/.local/share/cc-remote/cc-remote" doctor --json; Windows & "$env:LOCALAPPDATA\Programs\cc-remote\cc-remote.exe" doctor --json.
+4. Continue only if doctor JSON has ok=true. If not, stop and report the JSON.
+5. Confirm there is a public Linux/OpenSSH relay server controlled by the operator. If it is not configured yet, run cc-remote init-relay --user cc-tunnel and apply the printed Match User policy on that relay. Keep GatewayPorts no, validate with sudo sshd -t, and reload sshd; prefer reload, not restart.
+6. Save the relay once: cc-remote relay set --host <relay-host> --port <relay-ssh-port> --user cc-tunnel. If the operator explicitly provides an administrative SSH destination, include --ssh-host <relay-admin-ssh-alias>.
+7. Verify: cc-remote relay show --json and cc-remote relay doctor --json.
+8. Create one single-platform launcher with JSON output. The saved relay profile is reused automatically:
+   cc-remote create --json --name <target-name> --platform <windows|macos|linux> --launcher-format <cmd|command|sh> --handoff-mode embedded --target-user auto --idle-timeout 12h --max-lifetime 12h
+9. By default create does not modify the relay. Install the exact relay_authorized_key_line from create --json into the relay user's authorized_keys, preserving unrelated keys. Only use --install-relay=true when the operator explicitly authorizes that relay mutation for this session.
+10. Send only files listed in share_with_recipient to the authorized controlled machine. Do not send files listed in operator_only.
+11. Never print, copy, upload, or paste private-key bodies. Key information means operator-side private-key paths and public-key fingerprints only.
+12. Accept only the complete READY line emitted by the controlled launcher after verification: CC_REMOTE_READY <session-id> <target-user> <relay-host> <remote-port>. Never invent or construct READY.
+13. Register READY on the operator machine: cc-remote ready 'CC_REMOTE_READY ...'
+14. Start with read-only checks only, such as hostname, current user, and OS version. Do not modify the controlled machine until that exact work is authorized.
 ```
 
 ## Artifact handling

@@ -1,18 +1,34 @@
 {
   "version": 1,
   "repo": "fugaofugaofugao/cc-remote",
-  "release_url": "https://github.com/fugaofugaofugao/cc-remote/releases",
-  "asset_templates": {
-    "macos": "cc-remote_${release_version}_darwin_${arch}_full.zip",
-    "linux": "cc-remote_${release_version}_linux_${arch}_full.tar.gz",
-    "windows": "cc-remote_${release_version}_windows_${arch}_full.zip"
+  "release_url": "https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.2.1",
+  "direct_downloads": {
+    "windows_amd64": {
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_windows_amd64_full.zip",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_windows_amd64_full.zip.sha256"
+    },
+    "darwin_arm64": {
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_arm64_full.zip",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_arm64_full.zip.sha256"
+    },
+    "darwin_amd64": {
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_amd64_full.zip",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_darwin_amd64_full.zip.sha256"
+    },
+    "linux_amd64": {
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_amd64_full.tar.gz",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_amd64_full.tar.gz.sha256"
+    },
+    "linux_arm64": {
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_arm64_full.tar.gz",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.1/cc-remote_v0.2.1_linux_arm64_full.tar.gz.sha256"
+    }
   },
   "default_task": "create-session",
   "tasks": {
     "install": {
-      "required_inputs": ["os", "arch", "release_version"],
-      "download": "gh release download ${release_version} --repo fugaofugaofugao/cc-remote --pattern '<asset>*'",
-      "verify_first": ["SHA256SUMS.txt", "per-asset .sha256"],
+      "required_inputs": ["os", "arch"],
+      "verify_first": ["per-asset .sha256"],
       "commands_after_extract": {
         "macos": ["./install.sh", "$HOME/.local/share/cc-remote/cc-remote doctor --json"],
         "linux": ["./install.sh", "$HOME/.local/share/cc-remote/cc-remote doctor --json"],
@@ -21,11 +37,28 @@
       "mutates": ["user-local install directory", "optional user PATH"],
       "does_not_mutate": ["relay", "sshd", "~/.cc-remote sessions", "keys"]
     },
+    "configure-relay-once": {
+      "required_inputs": ["relay_host", "relay_ssh_port", "relay_user"],
+      "optional_inputs": ["relay_admin_ssh_alias"],
+      "commands": [
+        "cc-remote init-relay --user cc-tunnel",
+        "cc-remote relay set --host <relay_host> --port <relay_ssh_port> --user <relay_user> [--ssh-host <relay_admin_ssh_alias>]",
+        "cc-remote relay show --json",
+        "cc-remote relay doctor --json"
+      ],
+      "stores": "~/.cc-remote/config.json",
+      "secret_policy": "stores relay metadata only; never private-key bodies",
+      "requires_explicit_approval": ["editing relay sshd_config", "reloading relay sshd", "--install-relay=true"]
+    },
     "create-session": {
-      "required_inputs": ["platform", "relay_host", "relay_user", "idle_timeout", "max_lifetime"],
-      "preflight": [{"cmd": ["cc-remote", "doctor", "--json"], "must_pass": true}],
+      "required_inputs": ["platform", "idle_timeout", "max_lifetime"],
+      "preflight": [
+        {"cmd": ["cc-remote", "doctor", "--json"], "must_pass": true},
+        {"cmd": ["cc-remote", "relay", "doctor", "--json"], "must_pass": true}
+      ],
       "default_flags": {"--install-relay": false, "--target-user": "auto", "--launcher-format": "default", "--handoff-mode": "embedded"},
       "single_launcher_defaults": {"windows": "cmd", "macos": "command", "linux": "sh"},
+      "relay_defaults": "read from ~/.cc-remote/config.json; explicit create flags override saved profile",
       "requires_explicit_approval": ["--install-relay=true", "relay mutation", "controlled-side cleanup"],
       "machine_output": {"flag": "--json", "stdout": "pure JSON only", "secret_policy": "private-key paths and public fingerprints only; never private-key bodies"},
       "ready_acceptance": {"must_start_with": "CC_REMOTE_READY ", "must_match_session_record": true, "must_not_construct": true}

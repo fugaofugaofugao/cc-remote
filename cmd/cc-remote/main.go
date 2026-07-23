@@ -67,6 +67,8 @@ func run(args []string) error {
 		return printVersion()
 	case "ready":
 		return ready(args[2:])
+	case "relay":
+		return relay(args[2:])
 	case "list":
 		return list()
 	case "show":
@@ -91,6 +93,7 @@ Commands:
   doctor      verify installed binary/assets and payload readiness
   version     print version/build information
   ready       paste the CC_REMOTE_READY line back to save the detected target user
+  relay       save/show/check the default relay profile
   list        list local sessions
   show        print the complete operator-side connection information
   ssh         connect to a session target through the relay
@@ -122,10 +125,13 @@ func create(args []string) error {
 	if *legacyTTL != 0 {
 		*maxLifetime = *legacyTTL
 	}
+	if err := applyRelayDefaults(fs, relayHost, relayPort, relayUser, relaySSHHost); err != nil {
+		return err
+	}
 	*relayHost = strings.TrimSpace(*relayHost)
 	*relaySSHHost = strings.TrimSpace(*relaySSHHost)
 	if *relayHost == "" {
-		return errors.New("--relay-host is required; configure the public endpoint of a relay you control")
+		return errors.New("--relay-host is required; run cc-remote relay set --host <relay-host> --port <relay-ssh-port> --user cc-tunnel once, or pass --relay-host explicitly")
 	}
 	if err := validateRelayUser(*relayUser); err != nil {
 		return err
@@ -885,6 +891,274 @@ func closeSession(args []string) error {
 		fmt.Println("Relay authorization was not installed by this CLI; no remote relay change was made.")
 	}
 	fmt.Println("Ask the controlled machine to run cleanup.sh or cleanup.ps1 from its extracted bundle if idle cleanup has not run yet.")
+	return nil
+}
+
+type appConfig struct {
+	DefaultRelay relayProfile `json:"default_relay,omitempty"`
+}
+
+type relayProfile struct {
+	Host    string `json:"host,omitempty"`
+	Port    int    `json:"port,omitempty"`
+	User    string `json:"user,omitempty"`
+	SSHHost string `json:"ssh_host,omitempty"`
+}
+
+type relayShowResult struct {
+	OK         bool         `json:"ok"`
+	Configured bool         `json:"configured"`
+	ConfigPath string       `json:"config_path"`
+	Relay      relayProfile `json:"default_relay,omitempty"`
+}
+
+func configPath() (string, error) {
+	base, err := session.BaseDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "config.json"), nil
+}
+
+func readAppConfig() (appConfig, string, error) {
+	path, err := configPath()
+	if err != nil {
+		return appConfig{}, "", err
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return appConfig{}, path, nil
+	}
+	if err != nil {
+		return appConfig{}, path, err
+	}
+	var cfg appConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return appConfig{}, path, fmt.Errorf("read %s: %w", path, err)
+	}
+	return cfg, path, nil
+}
+
+func writeAppConfig(cfg appConfig) (string, error) {
+	base, err := session.EnsureDirs()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(base, "config.json")
+	return path, writeJSONAtomic(path, cfg, 0o600)
+}
+
+func validateRelayProfile(p relayProfile, requireHost bool) error {
+	p.Host = strings.TrimSpace(p.Host)
+	p.User = strings.TrimSpace(p.User)
+	p.SSHHost = strings.TrimSpace(p.SSHHost)
+	if requireHost && p.Host == "" {
+		return errors.New("relay host is required")
+	}
+	if p.Host != "" && strings.ContainsAny(p.Host, " \t\r\n") {
+		return fmt.Errorf("invalid relay host %q: whitespace is not allowed", p.Host)
+	}
+	if p.Port < 1 || p.Port > 65535 {
+		return fmt.Errorf("invalid relay port %d: use a port from 1 to 65535", p.Port)
+	}
+	if err := validateRelayUser(p.User); err != nil {
+		return err
+	}
+	return nil
+}
+
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	seen := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			seen = true
+		}
+	})
+	return seen
+}
+
+func applyRelayDefaults(fs *flag.FlagSet, relayHost *string, relayPort *int, relayUser *string, relaySSHHost *string) error {
+	relayHostSet := flagWasSet(fs, "relay-host")
+	relayPortSet := flagWasSet(fs, "relay-port")
+	relayUserSet := flagWasSet(fs, "relay-user")
+	relaySSHHostSet := flagWasSet(fs, "relay-ssh-host")
+	endpointFlagSet := relayHostSet || relayPortSet || relayUserSet
+	needsEndpointDefault := !relayHostSet || !relayPortSet || !relayUserSet
+	needsAdminHostDefault := !relaySSHHostSet && !endpointFlagSet
+	if !needsEndpointDefault && !needsAdminHostDefault {
+		return nil
+	}
+
+	cfg, _, err := readAppConfig()
+	if err != nil {
+		return err
+	}
+	profile := cfg.DefaultRelay
+	if profile.Host == "" {
+		return nil
+	}
+	if err := validateRelayProfile(profile, true); err != nil {
+		return fmt.Errorf("saved relay profile is invalid; run cc-remote relay set again: %w", err)
+	}
+	if !relayHostSet {
+		*relayHost = profile.Host
+	}
+	if !relayPortSet {
+		*relayPort = profile.Port
+	}
+	if !relayUserSet {
+		*relayUser = profile.User
+	}
+	if needsAdminHostDefault {
+		*relaySSHHost = profile.SSHHost
+	}
+	return nil
+}
+
+func relay(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: cc-remote relay set|show|doctor|clear")
+	}
+	switch args[0] {
+	case "set":
+		return relaySet(args[1:])
+	case "show":
+		return relayShow(args[1:])
+	case "doctor":
+		return relayDoctor(args[1:])
+	case "clear":
+		return relayClear(args[1:])
+	default:
+		return fmt.Errorf("unknown relay command %q: use set, show, doctor, or clear", args[0])
+	}
+}
+
+func relaySet(args []string) error {
+	fs := flag.NewFlagSet("relay set", flag.ExitOnError)
+	host := fs.String("host", "", "public relay hostname or address controlled machines dial")
+	port := fs.Int("port", 22, "public relay SSH port")
+	user := fs.String("user", "cc-tunnel", "dedicated relay tunnel user")
+	sshHost := fs.String("ssh-host", "", "optional operator-side administrative SSH alias for --install-relay")
+	jsonOutput := fs.Bool("json", false, "print machine-readable result")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	profile := relayProfile{Host: strings.TrimSpace(*host), Port: *port, User: strings.TrimSpace(*user), SSHHost: strings.TrimSpace(*sshHost)}
+	if err := validateRelayProfile(profile, true); err != nil {
+		return err
+	}
+	path, err := writeAppConfig(appConfig{DefaultRelay: profile})
+	if err != nil {
+		return err
+	}
+	res := relayShowResult{OK: true, Configured: true, ConfigPath: path, Relay: profile}
+	if *jsonOutput {
+		return printJSON(res)
+	}
+	fmt.Println("Saved default relay profile:", path)
+	fmt.Printf("Relay endpoint: %s:%d\n", profile.Host, profile.Port)
+	fmt.Println("Relay user:", profile.User)
+	if profile.SSHHost != "" {
+		fmt.Println("Administrative SSH destination:", profile.SSHHost)
+		fmt.Println("Automatic per-session relay authorization is still opt-in: pass --install-relay=true.")
+	} else {
+		fmt.Println("Administrative SSH destination: not saved; create will print relay_authorized_key_line for manual installation.")
+	}
+	return nil
+}
+
+func relayShow(args []string) error {
+	fs := flag.NewFlagSet("relay show", flag.ExitOnError)
+	jsonOutput := fs.Bool("json", false, "print machine-readable result")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, path, err := readAppConfig()
+	if err != nil {
+		return err
+	}
+	configured := cfg.DefaultRelay.Host != ""
+	res := relayShowResult{OK: true, Configured: configured, ConfigPath: path}
+	if configured {
+		res.Relay = cfg.DefaultRelay
+	}
+	if *jsonOutput {
+		return printJSON(res)
+	}
+	if !configured {
+		fmt.Println("No default relay profile is configured.")
+		fmt.Println("Run: cc-remote relay set --host <relay-host> --port <relay-ssh-port> --user cc-tunnel")
+		return nil
+	}
+	fmt.Println("Default relay profile:", path)
+	fmt.Printf("- Endpoint: %s:%d\n", cfg.DefaultRelay.Host, cfg.DefaultRelay.Port)
+	fmt.Println("- User:", cfg.DefaultRelay.User)
+	if cfg.DefaultRelay.SSHHost != "" {
+		fmt.Println("- Administrative SSH destination:", cfg.DefaultRelay.SSHHost)
+	} else {
+		fmt.Println("- Administrative SSH destination: not configured")
+	}
+	return nil
+}
+
+func relayDoctor(args []string) error {
+	fs := flag.NewFlagSet("relay doctor", flag.ExitOnError)
+	jsonOutput := fs.Bool("json", false, "print machine-readable result")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, path, err := readAppConfig()
+	if err != nil {
+		return err
+	}
+	res := relayShowResult{OK: true, Configured: cfg.DefaultRelay.Host != "", ConfigPath: path, Relay: cfg.DefaultRelay}
+	if !res.Configured {
+		res.OK = false
+	} else if err := validateRelayProfile(cfg.DefaultRelay, true); err != nil {
+		res.OK = false
+	}
+	if *jsonOutput {
+		if err := printJSON(res); err != nil {
+			return err
+		}
+		if !res.OK {
+			return errors.New("relay profile is not configured or invalid")
+		}
+		return nil
+	}
+	if !res.Configured {
+		fmt.Println("cc-remote relay doctor: no default relay profile configured")
+		fmt.Println("Run: cc-remote relay set --host <relay-host> --port <relay-ssh-port> --user cc-tunnel")
+		return errors.New("relay profile is not configured")
+	}
+	if err := validateRelayProfile(cfg.DefaultRelay, true); err != nil {
+		fmt.Println("cc-remote relay doctor: failed")
+		return err
+	}
+	fmt.Println("cc-remote relay doctor: ok")
+	fmt.Printf("- Endpoint: %s:%d\n", cfg.DefaultRelay.Host, cfg.DefaultRelay.Port)
+	fmt.Println("- User:", cfg.DefaultRelay.User)
+	fmt.Println("This validates the saved operator profile only. Verify sshd/GatewayPorts on the relay host separately with docs/relay.md.")
+	return nil
+}
+
+func relayClear(args []string) error {
+	fs := flag.NewFlagSet("relay clear", flag.ExitOnError)
+	jsonOutput := fs.Bool("json", false, "print machine-readable result")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	path, err := configPath()
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if *jsonOutput {
+		return printJSON(relayShowResult{OK: true, Configured: false, ConfigPath: path})
+	}
+	fmt.Println("Cleared default relay profile:", path)
 	return nil
 }
 

@@ -14,6 +14,45 @@ Each reverse listener is requested as `127.0.0.1:<port>` and is reachable by the
 
 Use a dedicated account, normally `cc-tunnel`. Do not reuse a personal administrator account.
 
+## Save the relay profile once
+
+The relay host itself is a one-time infrastructure prerequisite. After it is prepared, save the operator-side default profile once:
+
+```sh
+cc-remote relay set \
+  --host relay.example.test \
+  --port 22 \
+  --user cc-tunnel
+```
+
+If you have an operator-side administrative SSH alias and want the option to explicitly install per-session relay authorization later, save it too:
+
+```sh
+cc-remote relay set \
+  --host relay.example.test \
+  --port 22 \
+  --user cc-tunnel \
+  --ssh-host support-relay-admin
+```
+
+Check the saved profile:
+
+```sh
+cc-remote relay show --json
+cc-remote relay doctor --json
+```
+
+The profile is stored in `~/.cc-remote/config.json` with mode `0600`. It stores relay endpoint metadata only. It never stores private-key bodies, and it does not make relay mutation automatic. Every `cc-remote create` still generates fresh per-session keys and one restricted `authorized_keys` line.
+
+After the profile is saved, normal session creation can omit `--relay-host`, `--relay-port`, and `--relay-user`:
+
+```sh
+cc-remote create --json \
+  --name support-session \
+  --platform windows \
+  --launcher-format cmd
+```
+
 ## AI prompt for relay setup
 
 Copy this prompt when an AI/operator needs to prepare the relay before creating a
