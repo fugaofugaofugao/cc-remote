@@ -1,6 +1,6 @@
 # cc-remote
 
-中文说明: [README.zh-CN.md](README.zh-CN.md)
+**Languages:** English | [简体中文](README.zh-CN.md)
 
 `cc-remote` creates time-bounded SSH access for authorized remote support. A controlled Windows, macOS, or Linux machine runs a generated one-shot launcher, establishes a restricted reverse SSH tunnel to a public Linux/OpenSSH relay that **you control**, and prints a verified `CC_REMOTE_READY` line. The operator connects with fresh per-session keys.
 
