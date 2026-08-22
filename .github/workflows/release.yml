@@ -14,29 +14,34 @@ permissions:
   contents: write
 
 jobs:
-  # Build the self-contained unix OpenSSH payloads on their native arch runners so a
-  # controlled machine never depends on its own openssh components (arm64 + x86_64).
+  # Build the self-contained unix OpenSSH payloads so a controlled machine never
+  # depends on its own openssh components (arm64 + x86_64). Both darwin variants run
+  # on macos-14 arm64 runners: macos-arm64 natively, macos-x86_64 via prepare's
+  # clang -target x86_64 cross-compile (avoids scarce Intel macos-13 hosted runners).
   prepare-unix-payloads:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os-label: macos-arm64,  runner: macos-14,      los: darwin, arch: arm64 }
-          - { os-label: macos-x86_64, runner: macos-13,      los: darwin, arch: x86_64 }
-          - { os-label: linux-arm64,  runner: ubuntu-24.04-arm, los: linux,  arch: arm64 }
-          - { os-label: linux-x86_64, runner: ubuntu-latest, los: linux,  arch: x86_64 }
+          - { os-label: macos-arm64,  runner: macos-14,        los: darwin, arch: arm64, cross: "" }
+          - { os-label: macos-x86_64, runner: macos-14,        los: darwin, arch: x86_64, cross: "yes" }
+          - { os-label: linux-arm64,  runner: ubuntu-24.04-arm, los: linux,  arch: arm64, cross: "" }
+          - { os-label: linux-x86_64, runner: ubuntu-latest,   los: linux,  arch: x86_64, cross: "" }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install build deps (macOS)
-        if: startsWith(matrix.os-label, 'macos')
+      - name: Install build deps (macOS native)
+        if: matrix.los == 'darwin' && matrix.cross == ''
         run: |
           brew install openssl@3
       - name: Install build deps (Linux)
-        if: startsWith(matrix.os-label, 'linux')
+        if: matrix.los == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential curl libssl-dev
+      - name: Install minimal build deps (macOS cross)
+        if: matrix.los == 'darwin' && matrix.cross != ''
+        run: brew install pkgconf
       - name: Build ${{ matrix.os-label }} OpenSSH payload
         run: ./scripts/prepare-unix-openssh.sh --os ${{ matrix.los }} --arch ${{ matrix.arch }}
       - name: Upload ${{ matrix.os-label }} payload

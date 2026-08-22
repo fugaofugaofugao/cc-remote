@@ -21,12 +21,13 @@ Pinned digests (compiled once, then pinned):
 ```text
 windows/openssh-win64.zip                   23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba5
 macos/openssh-darwin-arm64-9.8p1.tar.gz     63226db97f12d36fc720b9e5e7304a509907df5ff08b7aa3917c2f96fe7db249
+macos/openssh-darwin-x86_64-9.8p1.tar.gz    509542271d56c033f33816306c9fe74e037595a8177e7a8b12ac33f5544d2a9d
 linux/openssh-linux-arm64-9.8p1.tar.gz      529a6f97330490754454383608987c888274602602d70a36ddd2617e7291654a
 linux/openssh-linux-x86_64-9.8p1.tar.gz     8c322411f4023424a2ba22e06694c3634486c115c964dadd2975bdb34da7b74f
 ```
 
-The macOS x86_64 digest is pinned on the first Intel-runner CI build (it is absent from
-a source-only tree, so `test.sh` skips it there).
+All payloads skip the source-only tree (so `test.sh` skips their digest checks there);
+the digests are pinned and verified once the payload archives are built.
 
 ## Windows (Win32-OpenSSH)
 

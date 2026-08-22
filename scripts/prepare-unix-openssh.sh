@@ -57,6 +57,26 @@ fi
 [ "$OS" = darwin ] || [ "$OS" = linux ] || { echo "os must be darwin|linux"; exit 1; }
 [ "$ARCH" = arm64 ] || [ "$ARCH" = x86_64 ] || { echo "arch must be arm64|x86_64"; exit 1; }
 
+# Cross-compilation: an arm64 macOS host can build a darwin x86_64 payload with
+# clang -target x86_64-apple-darwin + a cross-built x86_64 OpenSSL, so we do not
+# depend on GitHub's scarce Intel (macos-13) hosted runners registry to produce it.
+HOST_ARCH="$(uname -m | sed -e 's/aarch64/arm64/' -e 's/amd64/x86_64/')"
+CC_TARGET_FLAG=""
+CONFIGURE_HOST_FLAG=""
+LIBS_EXTRA=""
+CROSS_NOTE=""
+if [ "$OS" = darwin ] && [ "$HOST_ARCH" != "$ARCH" ]; then
+  CC_TARGET_FLAG="-target ${ARCH}-apple-macosx11.0"
+  CONFIGURE_HOST_FLAG="--host=${ARCH}-apple-darwin"
+  LIBS_EXTRA="-lpthread"
+  if [ "$HOST_ARCH" = arm64 ] && [ "$ARCH" = x86_64 ]; then
+    CROSS_NOTE="cross-compiling darwin x86_64 on arm64 host"
+  else
+    echo "unsupported cross-compile combination: host $HOST_ARCH -> darwin $ARCH" >&2
+    exit 1
+  fi
+fi
+
 # Fixed install prefix baked into sshd so it can find sshd-session at runtime.
 if [ -n "$PREFIX_OVERRIDE" ]; then
   PREFIX="$PREFIX_OVERRIDE"
@@ -126,14 +146,27 @@ if [ "$OS" = linux ]; then
   fi
   OSSL_PREFIX="$WORK/oprefix"
 else
-  # macOS: use brew OpenSSL (static libcrypto.a) for a mostly-self-contained client.
-  BREW_OSSL=""
-  for c in /opt/homebrew/opt/openssl@3 /usr/local/opt/openssl@3; do [ -d "$c" ] && BREW_OSSL="$c" && break; done
-  if [ -z "$BREW_OSSL" ] || [ ! -f "$BREW_OSSL/lib/libcrypto.a" ]; then
-    echo "macOS build requires Homebrew openssl@3 (with libcrypto.a) at /opt/homebrew/opt/openssl@3 or /usr/local/opt/openssl@3" >&2
-    exit 1
+  if [ -n "$CROSS_NOTE" ]; then
+    # Cross-compile: build a static x86_64 OpenSSL from source with clang -target,
+    # because Homebrew openssl@3 on an arm64 host is arm64-only.
+    echo "  $CROSS_NOTE"
+    rm -rf "$SRC/openssl-$OPENSSL_VER" && cd "$SRC" && tar xzf openssl.tar.gz && cd "openssl-$OPENSSL_VER"
+    CC="clang $CC_TARGET_FLAG" ./Configure darwin64-${ARCH}-cc no-shared no-tests no-async no-dso \
+      --prefix="$WORK/x64oprefix" >"$PJ/ossl-x64.cfg" 2>&1 || fail openssl-x64 ossl-x64.cfg
+    make -j"$NCPU" build_libs >"$PJ/ossl-x64.make" 2>&1 || fail openssl-x64 ossl-x64.make
+    make install_sw >"$PJ/ossl-x64.inst" 2>&1 || fail openssl-x64 ossl-x64.inst
+    OSSL_PREFIX="$WORK/x64oprefix"
+    echo "  openssl-x64: $OSSL_PREFIX"
+  else
+    # macOS native: use brew OpenSSL (static libcrypto.a) for a mostly-self-contained client.
+    BREW_OSSL=""
+    for c in /opt/homebrew/opt/openssl@3 /usr/local/opt/openssl@3; do [ -d "$c" ] && BREW_OSSL="$c" && break; done
+    if [ -z "$BREW_OSSL" ] || [ ! -f "$BREW_OSSL/lib/libcrypto.a" ]; then
+      echo "macOS build requires Homebrew openssl@3 (with libcrypto.a) at /opt/homebrew/opt/openssl@3 or /usr/local/opt/openssl@3" >&2
+      exit 1
+    fi
+    echo "  openssl: brew $BREW_OSSL"
   fi
-  echo "  openssl: brew $BREW_OSSL"
 fi
 
 # ----- openssh -----
@@ -142,16 +175,24 @@ cd "$SRC" && rm -rf "openssh-$OPENSSH_VER" && tar xzf openssh.tar.gz && cd "open
 CFG_SSL=""
 CPP_FLAGS=""
 LD_FLAGS=""
+EXTLIBS=""
 if [ "$OS" = linux ]; then
   CFG_SSL="--with-zlib=$ZLIB_PREFIX --with-ssl-dir=$OSSL_PREFIX"
+elif [ -n "$CROSS_NOTE" ]; then
+  CFG_SSL="--with-ssl-dir=$OSSL_PREFIX"
+  CPP_FLAGS="-I$OSSL_PREFIX/include"
+  LD_FLAGS="-L$OSSL_PREFIX/lib"
 else
   CFG_SSL="--with-ssl-dir=$BREW_OSSL"
   CPP_FLAGS="-I$BREW_OSSL/include"
   LD_FLAGS="-L$BREW_OSSL/lib"
 fi
 
-env LIBS="-lpthread" ./configure \
+[ -n "$CC_TARGET_FLAG" ] && export CC="clang $CC_TARGET_FLAG"
+# shellcheck disable=SC2086
+env LIBS="-lpthread $LIBS_EXTRA" ./configure \
   --prefix="$PREFIX" --libexecdir="$PREFIX/libexec" --sbindir="$PREFIX/bin" --bindir="$PREFIX/bin" \
+  $CONFIGURE_HOST_FLAG \
   $CFG_SSL \
   --without-openssl-header-check --disable-libutil --disable-utmp --disable-wtmp \
   --with-mantype=man --disable-security-key --without-pam \

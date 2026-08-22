@@ -39,6 +39,7 @@ payload_win_sha="23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba
 payload_macos_arm64="payloads/macos/openssh-darwin-arm64-9.8p1.tar.gz"
 payload_macos_arm64_sha="63226db97f12d36fc720b9e5e7304a509907df5ff08b7aa3917c2f96fe7db249"
 payload_macos_x86_64="payloads/macos/openssh-darwin-x86_64-9.8p1.tar.gz"
+payload_macos_x86_64_sha="509542271d56c033f33816306c9fe74e037595a8177e7a8b12ac33f5544d2a9d"
 payload_linux_arm64="payloads/linux/openssh-linux-arm64-9.8p1.tar.gz"
 payload_linux_arm64_sha="529a6f97330490754454383608987c888274602602d70a36ddd2617e7291654a"
 payload_linux_x86_64="payloads/linux/openssh-linux-x86_64-9.8p1.tar.gz"
@@ -63,7 +64,7 @@ case "$GOOS_VALUE" in
     if [ "$GOARCH_VALUE" = arm64 ]; then
       ensure_payload "$payload_macos_arm64" "$payload_macos_arm64_sha"; payload="$ROOT/$payload_macos_arm64"
     elif [ "$GOARCH_VALUE" = amd64 ]; then
-      ensure_payload "payloads/macos/openssh-darwin-x86_64-9.8p1.tar.gz"; payload="$ROOT/payloads/macos/openssh-darwin-x86_64-9.8p1.tar.gz"
+      ensure_payload "$payload_macos_x86_64" "$payload_macos_x86_64_sha"; payload="$ROOT/$payload_macos_x86_64"
     else
       echo "Unsupported goarch for darwin payload: $GOARCH_VALUE" >&2; exit 2
     fi ;;
