@@ -36,7 +36,17 @@ allowed_source_names = {
     "cc-remote-self-contained-source.zip",
     "cc-remote-source-only.zip",
 }
-openssh_payload_sha256 = "23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba5"
+# Bundled self-contained OpenSSH payload archives are third-party binaries built
+# from pinned OSS sources by prepare-*-openssh.sh; the whole archive's digest (not
+# its decompressed bytes) is the trust anchor, so internal .exe/.dll/.json and the
+# unix .tar.gz members are not scanned for secrets/IPs. amd64 unix digests are
+# pinned by the CI prepare step once built.
+openssh_payload_sha256 = {
+    "23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba5",  # win64.zip
+    "63226db97f12d36fc720b9e5e7304a509907df5ff08b7aa3917c2f96fe7db249",  # macos arm64 .tar.gz
+    "529a6f97330490754454383608987c888274602602d70a36ddd2617e7291654a",  # linux arm64 .tar.gz
+    "8c322411f4023424a2ba22e06694c3634486c115c964dadd2975bdb34da7b74f",  # linux x86_64 .tar.gz
+}
 
 extra = []
 if denylist_path:
@@ -86,7 +96,7 @@ def check_path(label):
 def scan_zip(path, prefix):
     try:
         archive_bytes = path.read_bytes()
-        trusted_payload = hashlib.sha256(archive_bytes).hexdigest() == openssh_payload_sha256
+        trusted_payload = hashlib.sha256(archive_bytes).hexdigest() in openssh_payload_sha256
         with zipfile.ZipFile(path) as archive:
             for info in archive.infolist():
                 label = f"{prefix}!{info.filename}"
@@ -99,7 +109,7 @@ def scan_zip(path, prefix):
                 if info.filename.lower().endswith(".zip"):
                     import io
                     try:
-                        nested_trusted_payload = hashlib.sha256(data).hexdigest() == openssh_payload_sha256
+                        nested_trusted_payload = hashlib.sha256(data).hexdigest() in openssh_payload_sha256
                         with zipfile.ZipFile(io.BytesIO(data)) as nested_archive:
                             for nested_info in nested_archive.infolist():
                                 nested_label = f"{label}!{nested_info.filename}"
@@ -126,7 +136,10 @@ else:
 for label, path in files:
     check_path(label)
     data = path.read_bytes()
-    scan_bytes(label, data)
+    # A bundled unix OpenSSH payload is a .tar.gz whose trust anchor is the whole
+    # archive digest; scan its opaque binary members as third-party, not as text.
+    trusted_archive = path.suffix.lower() == ".tar.gz" and hashlib.sha256(data).hexdigest() in openssh_payload_sha256
+    scan_bytes(label, data, third_party_binary=trusted_archive)
     if path.suffix.lower() == ".zip":
         scan_zip(path, label)
 

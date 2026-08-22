@@ -110,9 +110,9 @@ func create(args []string) error {
 	relaySSHHost := fs.String("relay-ssh-host", "", "administrative SSH host or alias used only with --install-relay")
 	installRelay := fs.Bool("install-relay", false, "explicitly install relay authorization through --relay-ssh-host")
 	targetUser := fs.String("target-user", autoTargetUser, "target machine login user; use auto to detect on controlled machine")
-	maxLifetime := fs.Duration("max-lifetime", 7*24*time.Hour, "hard safety lifetime for local record")
+	maxLifetime := fs.Duration("max-lifetime", 7*24*time.Hour, "hard safety lifetime for local record; 0 disables expiry")
 	legacyTTL := fs.Duration("ttl", 0, "deprecated alias for --max-lifetime")
-	idleTimeout := fs.Duration("idle-timeout", 2*time.Hour, "cleanup after this much time with no active SSH connection")
+	idleTimeout := fs.Duration("idle-timeout", 2*time.Hour, "cleanup after this much time with no active SSH connection; 0 disables idle cleanup")
 	payloadRoot := fs.String("payload-root", "payloads", "offline payload root")
 	platform := fs.String("platform", "all", "launcher platform: windows, macos, linux, or all")
 	launcherFormat := fs.String("launcher-format", "default", "launcher format: default, cmd, ps1, both, sh, command, or all")
@@ -191,6 +191,13 @@ func create(args []string) error {
 			return err
 		}
 	}
+	// Local sshd port for the bundled standalone OpenSSH on the controlled machine.
+	// Tied to the session id, in a high range distinct from <remote_port> and port 22,
+	// so it never collides with a pre-existing system sshd.
+	localPort, err := session.LocalSSHPortFromID(id)
+	if err != nil {
+		return err
+	}
 	base, err := session.EnsureDirs()
 	if err != nil {
 		return err
@@ -231,17 +238,22 @@ func create(args []string) error {
 	operatorSSHCommand := fmt.Sprintf("ssh -F %s %s", shellQuote(sshConfig), shellQuote(hostAlias))
 
 	created := time.Now().UTC()
+	expiresAt := time.Time{}
+	if *maxLifetime > 0 {
+		expiresAt = created.Add(*maxLifetime)
+	}
 	m := manifest.Manifest{
 		Version:               1,
 		SessionID:             id,
 		Name:                  *name,
 		CreatedAt:             created,
-		ExpiresAt:             created.Add(*maxLifetime),
+		ExpiresAt:             expiresAt,
 		IdleTimeoutSeconds:    int(idleTimeout.Seconds()),
 		RelayHost:             *relayHost,
 		RelayUser:             *relayUser,
 		RelaySSHPort:          *relayPort,
 		RemotePort:            port,
+		LocalSSHPort:          localPort,
 		TargetUser:            *targetUser,
 		TargetAuthorizedKey:   strings.TrimSpace(string(targetPub)) + " cc-remote:" + id,
 		TunnelPrivateKeyPath:  "keys/tunnel_ed25519",
@@ -366,6 +378,7 @@ func create(args []string) error {
 		RelaySSHPort:       *relayPort,
 		RelaySSHHost:       *relaySSHHost,
 		RemotePort:         port,
+		LocalSSHPort:       localPort,
 		TargetUser:         *targetUser,
 		BundlePath:         bundlePath,
 		HandoffCMDPath:     bundleCMD,
@@ -742,7 +755,31 @@ func collectPlatformPayloads(root, platform string) ([]manifest.Payload, error) 
 			return nil, fmt.Errorf("Windows OpenSSH payload SHA256 mismatch: expected %s, got %s", windowsOpenSSHSHA256, windowsPayload.SHA256)
 		}
 	}
+	// macOS/Linux launchers must bundle a self-contained OpenSSH payload built by
+	// scripts/prepare-unix-openssh.sh so the controlled machine never depends on its
+	// own system openssh. These payloads are cross-arch (arm64 + x86_64), so unlike
+	// Windows we enforce presence, not a fixed per-version sha (the bootstrap verifies
+	// the exact bundled bytes via the manifest). The "all" platform is assembled from a
+	// full release tree, so its payloads are validated by the release/packaging scripts,
+	// not here (a windows-only "all" bundle after --platform windows stays valid).
+	if platform == "macos" || platform == "linux" {
+		if err := requireUnixOpenSSHPayload(root, platform); err != nil {
+			return nil, err
+		}
+	}
 	return payloads, nil
+}
+
+// requireUnixOpenSSHPayload ensures at least one self-contained OpenSSH payload is
+// present for the platform, else the session would depend on the system sshd.
+// The payload root is the directory that directly holds the platform subdirs
+// (linux/, macos/, windows/), matching bundle.CollectPayloads.
+func requireUnixOpenSSHPayload(root, platform string) error {
+	matches, _ := filepath.Glob(filepath.Join(root, platform, "openssh-*.tar.gz"))
+	if len(matches) == 0 {
+		return fmt.Errorf("%s launcher requires a bundled self-contained OpenSSH payload (payloads/%s/openssh-*.tar.gz); run scripts/prepare-unix-openssh.sh --os ... --arch ...", platform, platform)
+	}
+	return nil
 }
 
 func ready(args []string) error {
@@ -1446,11 +1483,21 @@ func writeConnectionArtifacts(rec session.Record) error {
 
 	var md strings.Builder
 	fmt.Fprintf(&md, "# cc-remote connection: %s\n\n", rec.Name)
-	fmt.Fprintf(&md, "- Session ID: `%s`\n- Status: **%s**\n- Created: `%s`\n- Expires: `%s`\n", rec.ID, info.Status, rec.CreatedAt.Format(time.RFC3339), rec.ExpiresAt.Format(time.RFC3339))
+	fmt.Fprintf(&md, "- Session ID: `%s`\n- Status: **%s**\n- Created: `%s`\n", rec.ID, info.Status, rec.CreatedAt.Format(time.RFC3339))
+	if rec.ExpiresAt.IsZero() {
+		fmt.Fprintln(&md, "- Expires: `never` (manual close required)")
+	} else {
+		fmt.Fprintf(&md, "- Expires: `%s`\n", rec.ExpiresAt.Format(time.RFC3339))
+	}
 	if rec.ClosedAt != nil {
 		fmt.Fprintf(&md, "- Closed: `%s`\n", rec.ClosedAt.Format(time.RFC3339))
 	}
-	fmt.Fprintf(&md, "- Idle cleanup: `%s` after the last active SSH connection\n\n", rec.IdleTimeout)
+	if rec.IdleTimeout == "0s" {
+		fmt.Fprintln(&md, "- Idle cleanup: `disabled` (manual close required)")
+		fmt.Fprintln(&md)
+	} else {
+		fmt.Fprintf(&md, "- Idle cleanup: `%s` after the last active SSH connection\n\n", rec.IdleTimeout)
+	}
 	fmt.Fprintf(&md, "## Endpoint\n\n- Relay SSH: `%s:%d`\n- Restricted relay user: `%s`\n- Reverse listener: `127.0.0.1:%d` on relay loopback only\n- Controlled-machine user: `%s`\n\n", rec.RelayHost, rec.RelaySSHPort, rec.RelayUser, rec.RemotePort, rec.TargetUser)
 	fmt.Fprintf(&md, "## Operator keys\n\n- Target private-key path: `%s`\n- Target public-key fingerprint: `%s`\n- Tunnel private-key path: `%s`\n- Tunnel public-key fingerprint: `%s`\n\nPrivate-key contents are intentionally omitted. Keep both key files on the operator machine.\n\n", rec.TargetKeyPath, info.TargetKeyFingerprint, rec.TunnelKeyPath, info.TunnelKeyFingerprint)
 	fmt.Fprintf(&md, "## Connect\n\n")
@@ -1481,7 +1528,7 @@ func recordStatus(rec session.Record) string {
 	if rec.ClosedAt != nil {
 		return "closed"
 	}
-	if time.Now().UTC().After(rec.ExpiresAt) {
+	if !rec.ExpiresAt.IsZero() && time.Now().UTC().After(rec.ExpiresAt) {
 		return "expired"
 	}
 	if rec.TargetUser == "" || rec.TargetUser == autoTargetUser {

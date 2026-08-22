@@ -40,7 +40,7 @@ Install-and-use runtime archives
   macOS: cc-remote_${VERSION_VALUE}_darwin_amd64_full.zip, cc-remote_${VERSION_VALUE}_darwin_arm64_full.zip
   Linux: cc-remote_${VERSION_VALUE}_linux_amd64_full.tar.gz, cc-remote_${VERSION_VALUE}_linux_arm64_full.tar.gz
   Windows: cc-remote_${VERSION_VALUE}_windows_amd64_full.zip
-  Runtime archives include the CLI executable, bootstrap assets, docs, installers, and pinned Win32-OpenSSH payload.
+  Runtime archives include the CLI executable, bootstrap assets, docs, installers, and the pinned bundled OpenSSH payload for that platform (win/unix, built from pinned OSS sources by prepare-*-openssh.sh).
   Installers are user-local and do not create sessions, keys, relay authorization, services, or ~/.cc-remote records.
   Verify downloads with SHA256SUMS.txt or the per-asset .sha256 files before installing.
 EOF

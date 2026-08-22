@@ -22,6 +22,7 @@ type Record struct {
 	RelaySSHPort       int        `json:"relay_ssh_port"`
 	RelaySSHHost       string     `json:"relay_ssh_host"`
 	RemotePort         int        `json:"remote_port"`
+	LocalSSHPort       int        `json:"local_ssh_port,omitempty"`
 	TargetUser         string     `json:"target_user"`
 	BundlePath         string     `json:"bundle_path"`
 	HandoffCMDPath     string     `json:"handoff_cmd_path"`
@@ -76,9 +77,33 @@ func PortFromID(id string) (int, error) {
 	if len(id) < 4 {
 		return 0, errors.New("session id too short")
 	}
+	n, err := hexID(id)
+	if err != nil {
+		return 0, err
+	}
+	// relay reverse listener port, derived from the session id.
+	return 39000 + int(n%1001), nil
+}
+
+// LocalSSHPortFromID returns the controlled-machine local sshd port used by the
+// bundled standalone OpenSSH. It deliberately lives in a distinct high range from
+// the relay reverse <remote_port> (39000+) and avoids the privileged system port 22,
+// so the standalone sshd never conflicts with any pre-existing system sshd.
+func LocalSSHPortFromID(id string) (int, error) {
+	if len(id) < 4 {
+		return 0, errors.New("session id too short")
+	}
+	n, err := hexID(id)
+	if err != nil {
+		return 0, err
+	}
+	return 22000 + int(n%1000), nil
+}
+
+func hexID(id string) (uint16, error) {
 	var n uint16
 	if _, err := fmt.Sscanf(id[:4], "%x", &n); err != nil {
 		return 0, err
 	}
-	return 39000 + int(n%1001), nil
+	return n, nil
 }

@@ -17,10 +17,18 @@ if [ -n "${AUTH_KEYS:-}" ] && [ -f "$AUTH_KEYS" ]; then
   echo "removed temporary authorized_keys marker cc-remote:${SESSION_ID}"
 fi
 
+# Local forward target depends on the sshd we stood up: standalone bundled sshd port,
+# or the pre-existing system sshd on 22.
+local_dst="127.0.0.1:22"
+if [ "${LOCAL_SSHD_MODE:-}" = "standalone" ] && [ -n "${LOCAL_SSH_PORT:-}" ]; then
+  local_dst="127.0.0.1:${LOCAL_SSH_PORT}"
+fi
+
 if [ -n "${TUNNEL_PID:-}" ] && kill -0 "$TUNNEL_PID" >/dev/null 2>&1; then
   command_name="$(ps -p "$TUNNEL_PID" -o comm= 2>/dev/null || true)"
   command_line="$(ps -p "$TUNNEL_PID" -o command= 2>/dev/null || true)"
-  expected_forward="127.0.0.1:${REMOTE_PORT:-}:127.0.0.1:22"
+  expected_forward="127.0.0.1:${REMOTE_PORT:-}:${local_dst#127.0.0.1:}"
+  expected_forward_full="127.0.0.1:${REMOTE_PORT:-}:${local_dst}"
   expected_port="-p ${RELAY_SSH_PORT:-}"
   expected_target="${RELAY_USER:-}@${RELAY_HOST:-}"
   if [ "$(basename "$command_name")" = "ssh" ] &&
@@ -29,7 +37,8 @@ if [ -n "${TUNNEL_PID:-}" ] && kill -0 "$TUNNEL_PID" >/dev/null 2>&1; then
      [ -n "${RELAY_HOST:-}" ] &&
      [ -n "${RELAY_SSH_PORT:-}" ] &&
      [ -n "${TUNNEL_KEY:-}" ] &&
-     printf '%s\n' "$command_line" | grep -F -- "$expected_forward" >/dev/null &&
+     { printf '%s\n' "$command_line" | grep -F -- "$expected_forward_full" >/dev/null ||
+       printf '%s\n' "$command_line" | grep -F -- "$expected_forward" >/dev/null; } &&
      printf '%s\n' "$command_line" | grep -F -- "$expected_port" >/dev/null &&
      printf '%s\n' "$command_line" | grep -F -- "$expected_target" >/dev/null &&
      printf '%s\n' "$command_line" | grep -F -- "$TUNNEL_KEY" >/dev/null; then
@@ -37,6 +46,20 @@ if [ -n "${TUNNEL_PID:-}" ] && kill -0 "$TUNNEL_PID" >/dev/null 2>&1; then
     echo "stopped verified session tunnel process $TUNNEL_PID"
   else
     echo "warning: PID $TUNNEL_PID does not match this session tunnel; it was not stopped" >&2
+  fi
+fi
+
+# Stop only the standalone bundled sshd that THIS session started. The system sshd /
+# Remote Login / shared service is never touched (it is outside session ownership).
+if [ "${LOCAL_SSHD_MODE:-}" = "standalone" ] && [ -n "${LOCAL_SSHD_PID:-}" ] && kill -0 "$LOCAL_SSHD_PID" >/dev/null 2>&1; then
+  pcmd="$(ps -p "$LOCAL_SSHD_PID" -o command= 2>/dev/null || true)"
+  if printf '%s\n' "$pcmd" | grep -F -- "sshd" >/dev/null &&
+     printf '%s\n' "$pcmd" | grep -F -- "$SESSION_ID" >/dev/null 2>&1 ||
+     [ -f "${STATE_ROOT:-/var/tmp/cc-remote}/$SESSION_ID/sshd/sshd.pid" ]; then
+    kill "$LOCAL_SSHD_PID" || true
+    echo "stopped standalone session sshd $LOCAL_SSHD_PID (port ${LOCAL_SSH_PORT:-})"
+  else
+    echo "warning: standalone sshd PID $LOCAL_SSHD_PID does not match this session; not stopped" >&2
   fi
 fi
 

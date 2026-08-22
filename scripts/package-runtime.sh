@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-EXPECTED_OPENSSH_SHA256="23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba5"
 OUTPUT=""
 VERSION_VALUE="${VERSION:-dev}"
 GOOS_VALUE=""
@@ -28,10 +27,56 @@ done
 OUTPUT="$(mkdir -p "$OUTPUT" && cd "$OUTPUT" && pwd)"
 case "$OUTPUT/" in "$ROOT"/*) echo 'Output directory must be outside the source tree.' >&2; exit 2 ;; esac
 
-payload="$ROOT/payloads/windows/openssh-win64.zip"
-[ -f "$payload" ] || { echo "Missing full runtime payload: $payload" >&2; exit 1; }
-payload_sha="$(shasum -a 256 "$payload" | cut -d' ' -f1)"
-[ "$payload_sha" = "$EXPECTED_OPENSSH_SHA256" ] || { echo "Pinned payload mismatch: $payload_sha" >&2; exit 1; }
+# --- bundled self-contained OpenSSH payload per target platform ---------------------------------
+# Pinned (compile-once, verified) digests:
+#   Win32-OpenSSH: crafted by prepare-windows-openssh.sh
+#   unix (darwin/linux): crafted by prepare-unix-openssh.sh on native/CI runners
+# amd64 unix payloads are built on native x86_64 runners/CI; their digests are pinned
+# here once built. If a target's digest is not yet pinned we still require the payload
+# to exist so install-and-use does not silently ship without it.
+payload_win="payloads/windows/openssh-win64.zip"
+payload_win_sha="23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba5"
+payload_macos_arm64="payloads/macos/openssh-darwin-arm64-9.8p1.tar.gz"
+payload_macos_arm64_sha="63226db97f12d36fc720b9e5e7304a509907df5ff08b7aa3917c2f96fe7db249"
+payload_macos_x86_64="payloads/macos/openssh-darwin-x86_64-9.8p1.tar.gz"
+payload_linux_arm64="payloads/linux/openssh-linux-arm64-9.8p1.tar.gz"
+payload_linux_arm64_sha="529a6f97330490754454383608987c888274602602d70a36ddd2617e7291654a"
+payload_linux_x86_64="payloads/linux/openssh-linux-x86_64-9.8p1.tar.gz"
+payload_linux_x86_64_sha="8c322411f4023424a2ba22e06694c3634486c115c964dadd2975bdb34da7b74f"
+
+ensure_payload() { # $1=relpath  $2=expected_sha(optional)
+  local p="$ROOT/$1" sha
+  [ -f "$p" ] || { echo "Missing full runtime payload for $GOOS_VALUE/$GOARCH_VALUE: $p (run scripts/prepare-unix-openssh.sh or prepare-windows-openssh.sh)" >&2; exit 1; }
+  if [ -n "$2" ]; then
+    sha="$(shasum -a 256 "$p" | cut -d' ' -f1)"
+    [ "$sha" = "$2" ] || { echo "Pinned payload mismatch for $GOOS_VALUE/$GOARCH_VALUE: got $sha want $2" >&2; exit 1; }
+  else
+    echo "NOTE: no pinned digest yet for $GOOS_VALUE/$GOARCH_VALUE payload; verifying existence only." >&2
+  fi
+}
+
+payload=""
+case "$GOOS_VALUE" in
+  windows)
+    ensure_payload "$payload_win" "$payload_win_sha"; payload="$ROOT/$payload_win" ;;
+  darwin)
+    if [ "$GOARCH_VALUE" = arm64 ]; then
+      ensure_payload "$payload_macos_arm64" "$payload_macos_arm64_sha"; payload="$ROOT/$payload_macos_arm64"
+    elif [ "$GOARCH_VALUE" = amd64 ]; then
+      ensure_payload "payloads/macos/openssh-darwin-x86_64-9.8p1.tar.gz"; payload="$ROOT/payloads/macos/openssh-darwin-x86_64-9.8p1.tar.gz"
+    else
+      echo "Unsupported goarch for darwin payload: $GOARCH_VALUE" >&2; exit 2
+    fi ;;
+  linux)
+    if [ "$GOARCH_VALUE" = arm64 ]; then
+      ensure_payload "$payload_linux_arm64" "$payload_linux_arm64_sha"; payload="$ROOT/$payload_linux_arm64"
+    elif [ "$GOARCH_VALUE" = amd64 ]; then
+      ensure_payload "$payload_linux_x86_64" "$payload_linux_x86_64_sha"; payload="$ROOT/$payload_linux_x86_64"
+    else
+      echo "Unsupported goarch for linux payload: $GOARCH_VALUE" >&2; exit 2
+    fi ;;
+  *) echo "Unsupported platform for payload: $GOOS_VALUE" >&2; exit 2 ;;
+esac
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/cc-remote-runtime.XXXXXX")"
 chmod 700 "$WORK"
@@ -81,7 +126,8 @@ esac
 extracted="$verify/$name"
 [ -f "$extracted/$exe" ] || { echo 'Extracted runtime executable missing.' >&2; exit 1; }
 [ -f "$extracted/bootstrap/bootstrap.sh" ] || { echo 'Extracted bootstrap asset missing.' >&2; exit 1; }
-[ -f "$extracted/payloads/windows/openssh-win64.zip" ] || { echo 'Extracted Windows payload missing.' >&2; exit 1; }
+rel_payload="${payload#"$ROOT/"}"
+[ -f "$extracted/$rel_payload" ] || { echo "Extracted payload missing for $GOOS_VALUE/$GOARCH_VALUE: $rel_payload" >&2; exit 1; }
 if [ "$GOOS_VALUE" = "$(go env GOOS)" ] && [ "$GOARCH_VALUE" = "$(go env GOARCH)" ]; then
   "$extracted/$exe" version >/dev/null
 fi

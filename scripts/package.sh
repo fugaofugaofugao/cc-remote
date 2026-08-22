@@ -24,8 +24,8 @@ ALLOWLIST=(
   cmd/cc-remote/main.go cmd/cc-remote/main_test.go
   docs/distribution-privacy.md docs/payloads.md docs/relay.md docs/usage.md examples/ssh_config.example
   internal/bundle/bundle.go internal/bundle/bundle_test.go internal/manifest/manifest.go internal/session/session.go internal/session/session_test.go
-  payloads/macos/README-builtin-sshd.txt payloads/windows/openssh-win64.zip relay/cc-remote-relay-check.sh
-  scripts/README.md scripts/build.sh scripts/install.cmd scripts/install.command scripts/install.ps1 scripts/install.sh scripts/package-runtime.sh scripts/package.sh scripts/prepare-windows-openssh.sh scripts/privacy-scan.sh scripts/release.sh scripts/test.sh
+  payloads/linux/openssh-linux-arm64-9.8p1.tar.gz payloads/linux/openssh-linux-x86_64-9.8p1.tar.gz payloads/macos/README-builtin-sshd.txt payloads/macos/openssh-darwin-arm64-9.8p1.tar.gz payloads/windows/openssh-win64.zip relay/cc-remote-relay-check.sh
+  scripts/README.md scripts/build.sh scripts/install.cmd scripts/install.command scripts/install.ps1 scripts/install.sh scripts/package-runtime.sh scripts/package.sh scripts/prepare-unix-openssh.sh scripts/prepare-windows-openssh.sh scripts/privacy-scan.sh scripts/release.sh scripts/test.sh
   scripts/test-windows-authorization-handoff.ps1 scripts/test-windows-existing-tunnel-replacement.ps1 scripts/test-windows-idle-cleanup-task.ps1
   scripts/test-windows-monitor-relaunch.ps1 scripts/test-windows-target-user-resolution.ps1 scripts/test-windows-tunnel-handshake.ps1
 )
@@ -45,17 +45,13 @@ mkdir -p "$SELF_ROOT" "$SOURCE_ROOT"
 for rel in "${ALLOWLIST[@]}"; do
   mkdir -p "$SELF_ROOT/$(dirname "$rel")"
   cp -p "$ROOT/$rel" "$SELF_ROOT/$rel"
-  if [ "$rel" != payloads/windows/openssh-win64.zip ]; then
-    mkdir -p "$SOURCE_ROOT/$(dirname "$rel")"
-    cp -p "$ROOT/$rel" "$SOURCE_ROOT/$rel"
-  fi
+  # All pinned OpenSSH payload archives (win .zip + unix .tar.gz) are too large /
+  # third-party to ship in the source-only tree; keep them out.
+  case "$rel" in
+    payloads/windows/openssh-win64.zip|payloads/macos/openssh-*.tar.gz|payloads/linux/openssh-*.tar.gz) ;;
+    *) mkdir -p "$SOURCE_ROOT/$(dirname "$rel")"; cp -p "$ROOT/$rel" "$SOURCE_ROOT/$rel" ;;
+  esac
 done
-
-payload_sha="$(shasum -a 256 "$SELF_ROOT/payloads/windows/openssh-win64.zip" | cut -d' ' -f1)"
-if [ "$payload_sha" != "$EXPECTED_OPENSSH_SHA256" ]; then
-  echo "Pinned payload mismatch in staging: $payload_sha" >&2
-  exit 1
-fi
 
 "$SELF_ROOT/scripts/test.sh"
 "$SELF_ROOT/scripts/privacy-scan.sh" "$SELF_ROOT"
@@ -92,20 +88,29 @@ printf '%s  %s\n' "$self_sha" "$(basename "$SELF_ZIP")" > "$SELF_ZIP.sha256"
 printf '%s  %s\n' "$source_sha" "$(basename "$SOURCE_ZIP")" > "$SOURCE_ZIP.sha256"
 self_count="$(unzip -Z1 "$SELF_ZIP" | grep -v '/$' | wc -l | tr -d ' ')"
 source_count="$(unzip -Z1 "$SOURCE_ZIP" | grep -v '/$' | wc -l | tr -d ' ')"
+# Individual bundled OpenSSH payload digests for the manifest.
+win_sha="$(shasum -a 256 "$SELF_ROOT/payloads/windows/openssh-win64.zip" | cut -d' ' -f1)"
+macos_sha="$(shasum -a 256 "$SELF_ROOT/payloads/macos/openssh-darwin-arm64-9.8p1.tar.gz" | cut -d' ' -f1)"
+linux_sha="$(shasum -a 256 "$SELF_ROOT/payloads/linux/openssh-linux-arm64-9.8p1.tar.gz" | cut -d' ' -f1)"
+linux_x86_sha="$(shasum -a 256 "$SELF_ROOT/payloads/linux/openssh-linux-x86_64-9.8p1.tar.gz" | cut -d' ' -f1)"
 cat > "$OUTPUT/release-manifest.txt" <<EOF
 cc-remote privacy-safe source release
 
 cc-remote-self-contained-source.zip
   sha256: $self_sha
   files: $self_count
-  includes pinned Win32-OpenSSH payload: yes
+  includes pinned bundled OpenSSH payload (win + unix): yes
 
 cc-remote-source-only.zip
   sha256: $source_sha
   files: $source_count
-  includes pinned Win32-OpenSSH payload: no
+  includes pinned bundled OpenSSH payload: no
 
-Win32-OpenSSH payload sha256: $payload_sha
+Bundled OpenSSH payload archives (build sources + digests are pinned in prepare-*-openssh.sh/test.sh):
+  Win32-OpenSSH (windows): $win_sha
+  macOS arm64: $macos_sha
+  Linux arm64: $linux_sha
+  Linux x86_64: $linux_x86_sha
 Relay configuration: not included; recipients must configure a public Linux/OpenSSH relay they control.
 Generated sessions, launchers, keys, records, logs, state, known-host files, and connection metadata: not included.
 Verification: formatting, Go vet/tests, shell checks, available PowerShell checks, privacy scans, archive extraction, and extracted-tree retests completed successfully.

@@ -24,27 +24,27 @@
 Release 页面：
 
 ```text
-https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.2.4
+https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.3.0
 ```
 
 按操作端系统/架构下载对应 runtime archive 和 `.sha256`：
 
 | 操作端系统/架构 | Runtime archive | SHA256 文件 |
 | --- | --- | --- |
-| Windows x86_64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_windows_amd64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_windows_amd64_full.zip.sha256 |
-| macOS Apple Silicon | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_arm64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_arm64_full.zip.sha256 |
-| macOS Intel | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_amd64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_amd64_full.zip.sha256 |
-| Linux x86_64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_amd64_full.tar.gz | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_amd64_full.tar.gz.sha256 |
-| Linux ARM64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_arm64_full.tar.gz | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_arm64_full.tar.gz.sha256 |
+| Windows x86_64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_windows_amd64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_windows_amd64_full.zip.sha256 |
+| macOS Apple Silicon | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_arm64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_arm64_full.zip.sha256 |
+| macOS Intel | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_amd64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_amd64_full.zip.sha256 |
+| Linux x86_64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_amd64_full.tar.gz | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_amd64_full.tar.gz.sha256 |
+| Linux ARM64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_arm64_full.tar.gz | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_arm64_full.tar.gz.sha256 |
 
 macOS Apple Silicon 示例：
 
 ```sh
-curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_arm64_full.zip
-curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_arm64_full.zip.sha256
-shasum -a 256 -c cc-remote_v0.2.4_darwin_arm64_full.zip.sha256
-unzip cc-remote_v0.2.4_darwin_arm64_full.zip
-cd cc-remote_v0.2.4_darwin_arm64_full
+curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_arm64_full.zip
+curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_arm64_full.zip.sha256
+shasum -a 256 -c cc-remote_v0.3.0_darwin_arm64_full.zip.sha256
+unzip cc-remote_v0.3.0_darwin_arm64_full.zip
+cd cc-remote_v0.3.0_darwin_arm64_full
 ./install.sh
 "$HOME/.local/share/cc-remote/cc-remote" doctor --json
 ```
@@ -52,11 +52,11 @@ cd cc-remote_v0.2.4_darwin_arm64_full
 Linux x86_64 示例：
 
 ```sh
-curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_amd64_full.tar.gz
-curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_amd64_full.tar.gz.sha256
-sha256sum -c cc-remote_v0.2.4_linux_amd64_full.tar.gz.sha256
-tar -xzf cc-remote_v0.2.4_linux_amd64_full.tar.gz
-cd cc-remote_v0.2.4_linux_amd64_full
+curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_amd64_full.tar.gz
+curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_amd64_full.tar.gz.sha256
+sha256sum -c cc-remote_v0.3.0_linux_amd64_full.tar.gz.sha256
+tar -xzf cc-remote_v0.3.0_linux_amd64_full.tar.gz
+cd cc-remote_v0.3.0_linux_amd64_full
 ./install.sh
 "$HOME/.local/share/cc-remote/cc-remote" doctor --json
 ```
@@ -64,13 +64,13 @@ cd cc-remote_v0.2.4_linux_amd64_full
 Windows PowerShell 示例：
 
 ```powershell
-Invoke-WebRequest -Uri 'https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_windows_amd64_full.zip' -OutFile '.\cc-remote_v0.2.4_windows_amd64_full.zip'
-Invoke-WebRequest -Uri 'https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_windows_amd64_full.zip.sha256' -OutFile '.\cc-remote_v0.2.4_windows_amd64_full.zip.sha256'
-$Expected = (Get-Content '.\cc-remote_v0.2.4_windows_amd64_full.zip.sha256').Split(' ')[0].ToLowerInvariant()
-$Actual = (Get-FileHash '.\cc-remote_v0.2.4_windows_amd64_full.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+Invoke-WebRequest -Uri 'https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_windows_amd64_full.zip' -OutFile '.\cc-remote_v0.3.0_windows_amd64_full.zip'
+Invoke-WebRequest -Uri 'https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_windows_amd64_full.zip.sha256' -OutFile '.\cc-remote_v0.3.0_windows_amd64_full.zip.sha256'
+$Expected = (Get-Content '.\cc-remote_v0.3.0_windows_amd64_full.zip.sha256').Split(' ')[0].ToLowerInvariant()
+$Actual = (Get-FileHash '.\cc-remote_v0.3.0_windows_amd64_full.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($Actual -ne $Expected) { throw "SHA256 mismatch: $Actual" }
-Expand-Archive '.\cc-remote_v0.2.4_windows_amd64_full.zip'
-cd '.\cc-remote_v0.2.4_windows_amd64_full'
+Expand-Archive '.\cc-remote_v0.3.0_windows_amd64_full.zip'
+cd '.\cc-remote_v0.3.0_windows_amd64_full'
 .\install.ps1 -AddToPath
 & "$env:LOCALAPPDATA\Programs\cc-remote\cc-remote.exe" doctor --json
 ```
@@ -232,7 +232,7 @@ Windows 启动器会运行两个阶段：
 
 ### macOS
 
-发送生成的 `.command`。对方双击运行，输入一次 Mac 登录密码。启动器会启用并验证 Remote Login，写入本次会话公钥，然后启动受限反向隧道。
+发送生成的 `.command`。对方双击运行，输入一次 Mac 登录密码。启动器会安装**内置的自包含 OpenSSH**（`/usr/local/cc-remote/openssh`），在独立的 `local_ssh_port` 上启动隔离的独立 sshd（带会话专属主机密钥），并用内置 `ssh` 客户端建立反向隧道——完全不依赖本机 openssh 组件，也不触碰系统 Remote Login / 系统 sshd。
 
 日志位置：
 
@@ -243,7 +243,7 @@ Windows 启动器会运行两个阶段：
 
 ### Linux
 
-发送生成的 `.sh`，受控端需要 root 授权运行。如果没有 `sshd`，只允许使用准备好的兼容离线包；脚本不会静默联网下载。
+发送生成的 `.sh`，受控端需要 root 授权运行。启动器会安装**内置的自包含 OpenSSH**（`/opt/cc-remote/openssh`），在独立的 `local_ssh_port` 上启动隔离的独立 sshd，并用内置 `ssh` 客户端建立隧道——不依赖本机 openssh 组件、不联网下载软件包，且不触碰系统 sshd（22 端口）。
 
 ## 5. 注册 READY 并连接
 
@@ -302,57 +302,57 @@ cc-remote close support-session
 如果朋友是在他的电脑上作为“操作端”安装 cc-remote，可以把下面提示词发给他的 AI：
 
 ```text
-Install and use cc-remote v0.2.4 from GitHub Release. Do not clone source code, do not run go build, and do not rewrite the launcher scripts.
+Install and use cc-remote v0.3.0 from GitHub Release. Do not clone source code, do not run go build, and do not rewrite the launcher scripts.
 
 Release page:
-https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.2.4
+https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.3.0
 
 First install the operator CLI from exactly one matching runtime archive. Detect this operator machine's OS/architecture, select the single matching block below, run the commands as-is, and stop if SHA256 verification or doctor fails. Do not use GitHub source archives for normal operation. Detection commands: macOS/Linux run `uname -s` and `uname -m`; Windows PowerShell run `$env:PROCESSOR_ARCHITECTURE`. Mapping: Darwin arm64=macOS Apple Silicon, Darwin x86_64=macOS Intel, Linux x86_64=Linux x86_64, Linux aarch64/arm64=Linux ARM64, Windows AMD64=Windows x86_64.
 
 macOS Apple Silicon (Darwin arm64):
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_arm64_full.zip
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_arm64_full.zip.sha256
-  shasum -a 256 -c cc-remote_v0.2.4_darwin_arm64_full.zip.sha256
-  unzip cc-remote_v0.2.4_darwin_arm64_full.zip
-  cd cc-remote_v0.2.4_darwin_arm64_full
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_arm64_full.zip
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_arm64_full.zip.sha256
+  shasum -a 256 -c cc-remote_v0.3.0_darwin_arm64_full.zip.sha256
+  unzip cc-remote_v0.3.0_darwin_arm64_full.zip
+  cd cc-remote_v0.3.0_darwin_arm64_full
   ./install.sh
   "$HOME/.local/share/cc-remote/cc-remote" doctor --json
 
 macOS Intel (Darwin x86_64):
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_amd64_full.zip
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_amd64_full.zip.sha256
-  shasum -a 256 -c cc-remote_v0.2.4_darwin_amd64_full.zip.sha256
-  unzip cc-remote_v0.2.4_darwin_amd64_full.zip
-  cd cc-remote_v0.2.4_darwin_amd64_full
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_amd64_full.zip
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_amd64_full.zip.sha256
+  shasum -a 256 -c cc-remote_v0.3.0_darwin_amd64_full.zip.sha256
+  unzip cc-remote_v0.3.0_darwin_amd64_full.zip
+  cd cc-remote_v0.3.0_darwin_amd64_full
   ./install.sh
   "$HOME/.local/share/cc-remote/cc-remote" doctor --json
 
 Linux x86_64:
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_amd64_full.tar.gz
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_amd64_full.tar.gz.sha256
-  sha256sum -c cc-remote_v0.2.4_linux_amd64_full.tar.gz.sha256
-  tar -xzf cc-remote_v0.2.4_linux_amd64_full.tar.gz
-  cd cc-remote_v0.2.4_linux_amd64_full
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_amd64_full.tar.gz
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_amd64_full.tar.gz.sha256
+  sha256sum -c cc-remote_v0.3.0_linux_amd64_full.tar.gz.sha256
+  tar -xzf cc-remote_v0.3.0_linux_amd64_full.tar.gz
+  cd cc-remote_v0.3.0_linux_amd64_full
   ./install.sh
   "$HOME/.local/share/cc-remote/cc-remote" doctor --json
 
 Linux ARM64 (aarch64/arm64):
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_arm64_full.tar.gz
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_arm64_full.tar.gz.sha256
-  sha256sum -c cc-remote_v0.2.4_linux_arm64_full.tar.gz.sha256
-  tar -xzf cc-remote_v0.2.4_linux_arm64_full.tar.gz
-  cd cc-remote_v0.2.4_linux_arm64_full
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_arm64_full.tar.gz
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_arm64_full.tar.gz.sha256
+  sha256sum -c cc-remote_v0.3.0_linux_arm64_full.tar.gz.sha256
+  tar -xzf cc-remote_v0.3.0_linux_arm64_full.tar.gz
+  cd cc-remote_v0.3.0_linux_arm64_full
   ./install.sh
   "$HOME/.local/share/cc-remote/cc-remote" doctor --json
 
 Windows x86_64 PowerShell:
-  Invoke-WebRequest -Uri 'https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_windows_amd64_full.zip' -OutFile '.\cc-remote_v0.2.4_windows_amd64_full.zip'
-  Invoke-WebRequest -Uri 'https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_windows_amd64_full.zip.sha256' -OutFile '.\cc-remote_v0.2.4_windows_amd64_full.zip.sha256'
-  $Expected = (Get-Content '.\cc-remote_v0.2.4_windows_amd64_full.zip.sha256').Split(' ')[0].ToLowerInvariant()
-  $Actual = (Get-FileHash '.\cc-remote_v0.2.4_windows_amd64_full.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+  Invoke-WebRequest -Uri 'https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_windows_amd64_full.zip' -OutFile '.\cc-remote_v0.3.0_windows_amd64_full.zip'
+  Invoke-WebRequest -Uri 'https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_windows_amd64_full.zip.sha256' -OutFile '.\cc-remote_v0.3.0_windows_amd64_full.zip.sha256'
+  $Expected = (Get-Content '.\cc-remote_v0.3.0_windows_amd64_full.zip.sha256').Split(' ')[0].ToLowerInvariant()
+  $Actual = (Get-FileHash '.\cc-remote_v0.3.0_windows_amd64_full.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($Actual -ne $Expected) { throw "SHA256 mismatch: $Actual" }
-  Expand-Archive '.\cc-remote_v0.2.4_windows_amd64_full.zip'
-  cd '.\cc-remote_v0.2.4_windows_amd64_full'
+  Expand-Archive '.\cc-remote_v0.3.0_windows_amd64_full.zip'
+  cd '.\cc-remote_v0.3.0_windows_amd64_full'
   .\install.ps1 -AddToPath
   & "$env:LOCALAPPDATA\Programs\cc-remote\cc-remote.exe" doctor --json
 

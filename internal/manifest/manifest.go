@@ -19,6 +19,7 @@ type Manifest struct {
 	RelayUser                string    `json:"relay_user"`
 	RelaySSHPort             int       `json:"relay_ssh_port"`
 	RemotePort               int       `json:"remote_port"`
+	LocalSSHPort             int       `json:"local_ssh_port,omitempty"`
 	TargetUser               string    `json:"target_user"`
 	TargetAuthorizedKey      string    `json:"target_authorized_key"`
 	TunnelPrivateKeyPath     string    `json:"tunnel_private_key_path"`

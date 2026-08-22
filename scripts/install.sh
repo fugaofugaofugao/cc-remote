@@ -30,8 +30,24 @@ if [ ! -f "$self_dir/bootstrap/bootstrap.sh" ] || [ ! -f "$self_dir/bootstrap/bo
   echo "Missing bootstrap assets. The archive is incomplete." >&2
   exit 1
 fi
-if [ ! -f "$self_dir/payloads/windows/openssh-win64.zip" ]; then
-  echo "Missing bundled Windows OpenSSH payload. Use the full runtime archive for install-and-use behavior." >&2
+# Verify the bundled self-contained OpenSSH payload for THIS platform exists so
+# install-and-use works without depending on the machine's own openssh components.
+os="$(uname -s)"
+arch="$(uname -m)"
+case "$arch" in
+  arm64|aarch64) cc_arch=arm64 ;;
+  x86_64|amd64) cc_arch=x86_64 ;;
+  *) echo "Unsupported architecture: $arch" >&2; exit 1 ;;
+esac
+case "$os" in
+  Darwin) unix_payload="$self_dir/payloads/macos/openssh-darwin-$cc_arch-9.8p1.tar.gz" ;;
+  Linux) unix_payload="$self_dir/payloads/linux/openssh-linux-$cc_arch-9.8p1.tar.gz" ;;
+  MINGW*|MSYS*|CYGWIN*|*Windows*) unix_payload="" ;;
+  *) echo "Unsupported OS: $os" >&2; exit 1 ;;
+esac
+if [ -n "$unix_payload" ] && [ ! -f "$unix_payload" ]; then
+  echo "Missing bundled self-contained OpenSSH payload: $unix_payload"
+  echo "Use the full runtime archive for this platform for install-and-use behavior." >&2
   exit 1
 fi
 

@@ -10,9 +10,48 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fugaofugaofugao/cc-remote/internal/session"
 )
+
+// unixPayloadRoot returns a payload root containing a fake (any bytes) bundled
+// self-contained OpenSSH tarball for macOS and Linux, satisfying the presence check
+// that these platforms now require so the controlled machine never depends on its own
+// system openssh und username.
+func unixPayloadRoot(t *testing.T, platforms ...string) string {
+	t.Helper()
+	if len(platforms) == 0 {
+		platforms = []string{"macos", "linux"}
+	}
+	// The payload root IS the directory that directly holds the platform subdirs
+	// (macos/, linux/, windows/), matching bundle.CollectPayloads + requireUnixOpenSSHPayload.
+	root := t.TempDir()
+	for _, p := range platforms {
+		dir := filepath.Join(root, p)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "openssh-test.tar.gz"), []byte("fake payload"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+// windowsPayloadRoot returns a payload root containing the pinned Windows OpenSSH zip.
+func windowsPayloadRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, "windows")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "openssh-win64.zip"), []byte("fake windows openssh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
 
 func captureStdout(t *testing.T, action func() error) (string, error) {
 	t.Helper()
@@ -93,8 +132,18 @@ func TestWindowsCreateRequiresVerifiedOfflineOpenSSH(t *testing.T) {
 
 func TestNonWindowsCreateDoesNotRequireWindowsPayload(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := run([]string{"cc-remote", "create", "--name", "mac-only", "--platform", "macos", "--relay-host", "relay.example.test", "--relay-port", "22", "--install-relay=false", "--payload-root", t.TempDir()}); err != nil {
+	// macOS does not need the Windows payload, but it does need its own bundled
+	// self-contained OpenSSH so the controlled machine never depends on system openssh.
+	if err := run([]string{"cc-remote", "create", "--name", "mac-only", "--platform", "macos", "--relay-host", "relay.example.test", "--relay-port", "22", "--install-relay=false", "--payload-root", unixPayloadRoot(t)}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMacOSCreateRequiresBundledUnixOpenSSH(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	err := run([]string{"cc-remote", "create", "--name", "no-unix-payload", "--platform", "macos", "--relay-host", "relay.example.test", "--relay-port", "22", "--install-relay=false", "--payload-root", t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "requires a bundled self-contained OpenSSH payload") {
+		t.Fatalf("expected missing macOS unix OpenSSH payload error, got %v", err)
 	}
 }
 
@@ -140,7 +189,7 @@ func TestRelaySetShowAndCreateUsesSavedDefaults(t *testing.T) {
 	if shown.Relay != saved.Relay {
 		t.Fatalf("relay show mismatch: got %+v want %+v", shown.Relay, saved.Relay)
 	}
-	if err := run([]string{"cc-remote", "create", "--name", "saved-relay", "--platform", "macos", "--launcher-format", "command", "--install-relay=false", "--payload-root", t.TempDir()}); err != nil {
+	if err := run([]string{"cc-remote", "create", "--name", "saved-relay", "--platform", "macos", "--launcher-format", "command", "--install-relay=false", "--payload-root", unixPayloadRoot(t)}); err != nil {
 		t.Fatal(err)
 	}
 	rec, _ := onlySessionRecord(t)
@@ -154,7 +203,7 @@ func TestCreateRelayFlagsOverrideSavedDefaults(t *testing.T) {
 	if err := run([]string{"cc-remote", "relay", "set", "--host", "relay.example.test", "--port", "39022", "--user", "cc-tunnel", "--ssh-host", "support-relay"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := run([]string{"cc-remote", "create", "--name", "override-relay", "--platform", "macos", "--launcher-format", "command", "--relay-host", "other.example.test", "--relay-port", "2222", "--relay-user", "other-tunnel", "--relay-ssh-host", "other-admin", "--install-relay=false", "--payload-root", t.TempDir()}); err != nil {
+	if err := run([]string{"cc-remote", "create", "--name", "override-relay", "--platform", "macos", "--launcher-format", "command", "--relay-host", "other.example.test", "--relay-port", "2222", "--relay-user", "other-tunnel", "--relay-ssh-host", "other-admin", "--install-relay=false", "--payload-root", unixPayloadRoot(t)}); err != nil {
 		t.Fatal(err)
 	}
 	rec, _ := onlySessionRecord(t)
@@ -168,7 +217,7 @@ func TestCreateRelayOverrideDoesNotReuseSavedAdminHost(t *testing.T) {
 	if err := run([]string{"cc-remote", "relay", "set", "--host", "relay.example.test", "--port", "39022", "--user", "cc-tunnel", "--ssh-host", "support-relay"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := run([]string{"cc-remote", "create", "--name", "override-relay-admin", "--platform", "macos", "--launcher-format", "command", "--relay-host", "other.example.test", "--install-relay=false", "--payload-root", t.TempDir()}); err != nil {
+	if err := run([]string{"cc-remote", "create", "--name", "override-relay-admin", "--platform", "macos", "--launcher-format", "command", "--relay-host", "other.example.test", "--install-relay=false", "--payload-root", unixPayloadRoot(t)}); err != nil {
 		t.Fatal(err)
 	}
 	rec, _ := onlySessionRecord(t)
@@ -186,7 +235,7 @@ func TestExplicitCreateIgnoresInvalidSavedRelay(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(base, "config.json"), []byte(`{"default_relay":{"host":"bad.example.test","port":70000,"user":"bad user"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := run([]string{"cc-remote", "create", "--name", "explicit-relay", "--platform", "macos", "--launcher-format", "command", "--relay-host", "good.example.test", "--relay-port", "22", "--relay-user", "cc-tunnel", "--install-relay=false", "--payload-root", t.TempDir()}); err != nil {
+	if err := run([]string{"cc-remote", "create", "--name", "explicit-relay", "--platform", "macos", "--launcher-format", "command", "--relay-host", "good.example.test", "--relay-port", "22", "--relay-user", "cc-tunnel", "--install-relay=false", "--payload-root", unixPayloadRoot(t)}); err != nil {
 		t.Fatal(err)
 	}
 	rec, _ := onlySessionRecord(t)
@@ -240,7 +289,7 @@ func TestRelayBootstrapScriptKeepsLoopbackAndReloads(t *testing.T) {
 
 func TestCreateWithoutRelayExplainsRelaySet(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	err := run([]string{"cc-remote", "create", "--name", "missing-relay", "--platform", "macos", "--launcher-format", "command", "--install-relay=false", "--payload-root", t.TempDir()})
+	err := run([]string{"cc-remote", "create", "--name", "missing-relay", "--platform", "macos", "--launcher-format", "command", "--install-relay=false", "--payload-root", unixPayloadRoot(t)})
 	if err == nil || !strings.Contains(err.Error(), "Ask the operator") || !strings.Contains(err.Error(), "cc-remote relay set") {
 		t.Fatalf("expected ask-operator relay set guidance, got %v", err)
 	}
@@ -250,7 +299,7 @@ func TestCreateWithoutRelayExplainsRelaySet(t *testing.T) {
 func TestCreateJSONStdoutIsPureJSON(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	out, err := captureStdout(t, func() error {
-		return run([]string{"cc-remote", "create", "--json", "--name", "json-only", "--platform", "macos", "--launcher-format", "command", "--relay-host", "relay.example.test", "--relay-port", "22", "--install-relay=false", "--payload-root", t.TempDir()})
+		return run([]string{"cc-remote", "create", "--json", "--name", "json-only", "--platform", "macos", "--launcher-format", "command", "--relay-host", "relay.example.test", "--relay-port", "22", "--install-relay=false", "--payload-root", unixPayloadRoot(t)})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -269,7 +318,7 @@ func TestCreateJSONStdoutIsPureJSON(t *testing.T) {
 
 func TestCreateRejectsIncompatibleLauncherFormat(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	err := run([]string{"cc-remote", "create", "--name", "bad-format", "--platform", "linux", "--launcher-format", "cmd", "--relay-host", "relay.example.test", "--relay-port", "22", "--install-relay=false", "--payload-root", t.TempDir()})
+	err := run([]string{"cc-remote", "create", "--name", "bad-format", "--platform", "linux", "--launcher-format", "cmd", "--relay-host", "relay.example.test", "--relay-port", "22", "--install-relay=false", "--payload-root", unixPayloadRoot(t)})
 	if err == nil || !strings.Contains(err.Error(), "--platform linux cannot generate cmd launcher") {
 		t.Fatalf("expected incompatible format error, got %v", err)
 	}
@@ -278,7 +327,7 @@ func TestCreateRejectsIncompatibleLauncherFormat(t *testing.T) {
 
 func TestMacOSCreateBuildsParseableCommandWithoutWindowsPayload(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := run([]string{"cc-remote", "create", "--name", "mac-command", "--platform", "macos", "--relay-host", "relay.example.test", "--relay-port", "22", "--install-relay=false", "--payload-root", t.TempDir()}); err != nil {
+	if err := run([]string{"cc-remote", "create", "--name", "mac-command", "--platform", "macos", "--relay-host", "relay.example.test", "--relay-port", "22", "--install-relay=false", "--payload-root", unixPayloadRoot(t)}); err != nil {
 		t.Fatal(err)
 	}
 	base, err := session.BaseDir()
@@ -735,7 +784,9 @@ func TestUnixCleanupNeverChangesSharedSSHService(t *testing.T) {
 		`ps -p "$TUNNEL_PID" -o comm=`,
 		`ps -p "$TUNNEL_PID" -o command=`,
 		`[ "$(basename "$command_name")" = "ssh" ]`,
-		`expected_forward="127.0.0.1:${REMOTE_PORT:-}:127.0.0.1:22"`,
+		`local_dst="127.0.0.1:22"`,
+		`LOCAL_SSHD_MODE:-}" = "standalone"`,
+		`expected_forward_full="127.0.0.1:${REMOTE_PORT:-}:${local_dst}"`,
 		`expected_port="-p ${RELAY_SSH_PORT:-}"`,
 		`expected_target="${RELAY_USER:-}@${RELAY_HOST:-}"`,
 		`grep -F -- "$TUNNEL_KEY"`,
@@ -767,6 +818,20 @@ func TestUnixStateRecordsTunnelIdentity(t *testing.T) {
 		if !strings.Contains(text, required) {
 			t.Fatalf("Unix state is missing tunnel identity field %q", required)
 		}
+	}
+}
+
+func TestPermanentSessionStatus(t *testing.T) {
+	rec := session.Record{ExpiresAt: time.Time{}, TargetUser: "operator"}
+	if got := recordStatus(rec); got != "ready" {
+		t.Fatalf("permanent session status = %q, want ready", got)
+	}
+}
+
+func TestExpiredSessionStatus(t *testing.T) {
+	rec := session.Record{ExpiresAt: time.Now().UTC().Add(-time.Minute), TargetUser: "operator"}
+	if got := recordStatus(rec); got != "expired" {
+		t.Fatalf("expired session status = %q, want expired", got)
 	}
 }
 
@@ -1055,7 +1120,7 @@ func TestCreateValidationLeavesNoSessionArtifacts(t *testing.T) {
 func TestDefaultCreatePrintsRestrictedAuthorizationWithoutRelayMutation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	output, err := captureStdout(t, func() error {
-		return run([]string{"cc-remote", "create", "--name", "manual-relay", "--platform", "macos", "--relay-host", "relay.example.test", "--payload-root", t.TempDir()})
+		return run([]string{"cc-remote", "create", "--name", "manual-relay", "--platform", "macos", "--relay-host", "relay.example.test", "--payload-root", unixPayloadRoot(t)})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1093,7 +1158,7 @@ func TestExplicitRelayInstallUsesConfiguredAdministrativeDestination(t *testing.
 	}
 	t.Setenv("CC_REMOTE_TEST_SSH_INVOCATION", invocationPath)
 	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if err := run([]string{"cc-remote", "create", "--name", "installed-relay", "--platform", "macos", "--relay-host", "relay.example.test", "--relay-ssh-host", "relay-admin", "--install-relay=true", "--payload-root", t.TempDir()}); err != nil {
+	if err := run([]string{"cc-remote", "create", "--name", "installed-relay", "--platform", "macos", "--relay-host", "relay.example.test", "--relay-ssh-host", "relay-admin", "--install-relay=true", "--payload-root", unixPayloadRoot(t)}); err != nil {
 		t.Fatal(err)
 	}
 	invocation, err := os.ReadFile(invocationPath)
@@ -1112,7 +1177,7 @@ func TestExplicitRelayInstallUsesConfiguredAdministrativeDestination(t *testing.
 
 func TestReadyValidationPreservesArtifactsByteForByte(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := run([]string{"cc-remote", "create", "--name", "ready-validation", "--platform", "macos", "--relay-host", "relay.example.test", "--payload-root", t.TempDir()}); err != nil {
+	if err := run([]string{"cc-remote", "create", "--name", "ready-validation", "--platform", "macos", "--relay-host", "relay.example.test", "--payload-root", unixPayloadRoot(t)}); err != nil {
 		t.Fatal(err)
 	}
 	rec, recordPath := onlySessionRecord(t)
@@ -1174,7 +1239,7 @@ func TestUsageAndRelayGuidanceAreProviderNeutral(t *testing.T) {
 
 func TestDefaultCloseMakesNoRemoteRelayChange(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := run([]string{"cc-remote", "create", "--name", "manual-close", "--platform", "macos", "--relay-host", "relay.example.test", "--payload-root", t.TempDir()}); err != nil {
+	if err := run([]string{"cc-remote", "create", "--name", "manual-close", "--platform", "macos", "--relay-host", "relay.example.test", "--payload-root", unixPayloadRoot(t)}); err != nil {
 		t.Fatal(err)
 	}
 	rec, _ := onlySessionRecord(t)
@@ -1203,7 +1268,7 @@ func TestDefaultCloseMakesNoRemoteRelayChange(t *testing.T) {
 
 func TestMalformedInstalledRelayRecordFailsClosed(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := run([]string{"cc-remote", "create", "--name", "malformed-close", "--platform", "macos", "--relay-host", "relay.example.test", "--payload-root", t.TempDir()}); err != nil {
+	if err := run([]string{"cc-remote", "create", "--name", "malformed-close", "--platform", "macos", "--relay-host", "relay.example.test", "--payload-root", unixPayloadRoot(t)}); err != nil {
 		t.Fatal(err)
 	}
 	rec, recordPath := onlySessionRecord(t)

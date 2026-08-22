@@ -1,8 +1,34 @@
 # Offline payloads
 
-cc-remote can embed verified installers so a controlled machine does not need an uncontrolled network download during support.
+cc-remote embeds a **self-contained OpenSSH** for every supported OS so a controlled
+machine can run a local sshd and build the reverse tunnel **without depending on its
+own system openssh components** — whether the CPU is ARM or x86.
 
-## Windows Win32-OpenSSH
+Each payload is built from pinned OSS sources by a `prepare-*-openssh.sh` script and
+shipped inside the launcher bundle. The bootstrap verifies the exact embedded bytes via
+the manifest before use.
+
+| Platform | Payload archive | Built by | Status |
+|---|---|---|---|
+| Windows (x86_64) | `payloads/windows/openssh-win64.zip` | `prepare-windows-openssh.sh` (download, pinned) | included |
+| macOS arm64 | `payloads/macos/openssh-darwin-arm64-9.8p1.tar.gz` | `prepare-unix-openssh.sh --os darwin --arch arm64` | included |
+| macOS x86_64 | `payloads/macos/openssh-darwin-x86_64-9.8p1.tar.gz` | `prepare-unix-openssh.sh --os darwin --arch x86_64` (Intel CI runner) | CI-built |
+| Linux arm64 | `payloads/linux/openssh-linux-arm64-9.8p1.tar.gz` | `prepare-unix-openssh.sh --os linux --arch arm64` | included |
+| Linux x86_64 | `payloads/linux/openssh-linux-x86_64-9.8p1.tar.gz` | `prepare-unix-openssh.sh --os linux --arch x86_64` | included |
+
+Pinned digests (compiled once, then pinned):
+
+```text
+windows/openssh-win64.zip                   23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba5
+macos/openssh-darwin-arm64-9.8p1.tar.gz     63226db97f12d36fc720b9e5e7304a509907df5ff08b7aa3917c2f96fe7db249
+linux/openssh-linux-arm64-9.8p1.tar.gz      529a6f97330490754454383608987c888274602602d70a36ddd2617e7291654a
+linux/openssh-linux-x86_64-9.8p1.tar.gz     8c322411f4023424a2ba22e06694c3634486c115c964dadd2975bdb34da7b74f
+```
+
+The macOS x86_64 digest is pinned on the first Intel-runner CI build (it is absent from
+a source-only tree, so `test.sh` skips it there).
+
+## Windows (Win32-OpenSSH)
 
 Windows and `all` launcher generation require:
 
@@ -17,39 +43,58 @@ Pinned upstream artifact:
 - Source: `https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-Win64.zip`
 - SHA-256: `23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba5`
 
-Verify locally:
+Verify locally: `shasum -a 256 payloads/windows/openssh-win64.zip`. Refresh only with
+`./scripts/prepare-windows-openssh.sh`, which downloads, verifies the pinned digest, and
+replaces the payload only on success. Generation validates the digest and fails closed
+when absent or different. The upstream archive is included unmodified; its
+`OpenSSH-Win64/LICENSE.txt` / `NOTICE.txt` remain inside. When Windows lacks `sshd`, the
+bootstrap extracts the verified archive under the session's controlled ProgramData area,
+installs the bundled server, and uses the bundled `ssh.exe` for the reverse tunnel.
+
+## macOS (bundled standalone sshd)
+
+macOS and Linux use `prepare-unix-openssh.sh`, which downloads pinned OpenSSH 9.8p1 +
+OpenSSL 3.0.15 + zlib 1.3.1 sources and builds a self-contained
+`openssh-<os>-<arch>-9.8p1.tar.gz` in-tree (no `make install`).
 
 ```sh
-shasum -a 256 payloads/windows/openssh-win64.zip
+./scripts/prepare-unix-openssh.sh --os darwin --arch arm64
+./scripts/prepare-unix-openssh.sh --os darwin --arch x86_64   # on an Intel runner
 ```
 
-Refresh only with:
+The macOS archive is built against Homebrew OpenSSL `@3` and links only macOS's base
+system runtime (libSystem) — it never depends on the OS's own sshd/ssh programs.
+
+**macOS behavior boundary:** the bundled `sshd` runs as an isolated standalone daemon on
+its own port (`local_ssh_port`) and its own session-scoped host keys, writes to its own
+isolated `authorized_keys` / `sshd_config` / logs under `/var/tmp/cc-remote/<session>/`,
+and does **not** touch the system sshd, launchd Remote Login service, system OpenSSH
+binaries, or system configuration. Cleanup stops only the session's standalone sshd and
+tunnel. See `payloads/macos/README-builtin-sshd.txt`.
+
+## Linux (bundled standalone sshd)
 
 ```sh
-./scripts/prepare-windows-openssh.sh
+./scripts/prepare-unix-openssh.sh --os linux --arch arm64
+./scripts/prepare-unix-openssh.sh --os linux --arch x86_64
 ```
 
-The script downloads to a temporary file, verifies the pinned digest, and replaces the payload only on success. Launcher generation also validates the digest and fails closed when the payload is absent or different.
+The Linux archive statically links OpenSSL/zlib and depends only on the base C runtime
+(glibc), never on the machine's own sshd/ssh. The bundled `sshd` runs standalone on
+`local_ssh_port` with session-scoped host keys and isolated authorized_keys under
+`/var/tmp/cc-remote/<session>/`; the system sshd (port 22) and its service are left
+untouched before and after a session.
 
-The upstream archive is included unmodified. Its `OpenSSH-Win64/LICENSE.txt` and `OpenSSH-Win64/NOTICE.txt` remain inside the ZIP. See the repository's [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
-
-When Windows lacks `sshd`, the bootstrap extracts the verified archive under the session's controlled ProgramData area, installs the bundled server, and uses the bundled `ssh.exe` for the reverse tunnel. No Windows Update or recipient-side download is required.
+For Linux and macOS the bootstrap:
+1. installs the verified payload under a fixed prefix (`/opt/cc-remote/openssh` on
+   Linux, `/usr/local/cc-remote/openssh` on macOS) only when its digest matches,
+2. generates session host keys and starts the bundled standalone `sshd` on
+   `local_ssh_port`,
+3. builds the reverse tunnel with the bundled `bin/ssh`.
 
 ## Source-only distribution
 
-The source-only release intentionally omits `payloads/windows/openssh-win64.zip`. Recipients who need Windows launcher generation must run the preparation script and verify the expected digest before use. macOS and Linux source workflows do not require this ZIP.
-
-## Linux
-
-Linux packages are distribution and release specific. Prepare them in a matching environment and place complete sets under:
-
-```text
-payloads/linux/debian/*.deb
-payloads/linux/rhel/*.rpm
-```
-
-Do not mix versions or distributions. Preserve package signatures, licenses, notices, and provenance. If installed `sshd` is absent and no compatible offline package set exists, the bootstrap exits rather than silently using a network repository.
-
-## macOS
-
-macOS includes OpenSSH Server. No third-party OpenSSH payload is required.
+The source-only release intentionally omits **all** payload archives
+(`payloads/windows/openssh-win64.zip` and every `payloads/{macos,linux}/openssh-*.tar.gz`).
+Recipients must run the matching `prepare-*-openssh.sh` script and verify the expected
+digest before generating launchers.

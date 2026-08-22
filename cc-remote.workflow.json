@@ -1,27 +1,27 @@
 {
   "version": 1,
   "repo": "fugaofugaofugao/cc-remote",
-  "release_url": "https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.2.4",
+  "release_url": "https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.3.0",
   "direct_downloads": {
     "windows_amd64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_windows_amd64_full.zip",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_windows_amd64_full.zip.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_windows_amd64_full.zip",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_windows_amd64_full.zip.sha256"
     },
     "darwin_arm64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_arm64_full.zip",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_arm64_full.zip.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_arm64_full.zip",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_arm64_full.zip.sha256"
     },
     "darwin_amd64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_amd64_full.zip",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_darwin_amd64_full.zip.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_amd64_full.zip",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_darwin_amd64_full.zip.sha256"
     },
     "linux_amd64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_amd64_full.tar.gz",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_amd64_full.tar.gz.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_amd64_full.tar.gz",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_amd64_full.tar.gz.sha256"
     },
     "linux_arm64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_arm64_full.tar.gz",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.2.4/cc-remote_v0.2.4_linux_arm64_full.tar.gz.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_arm64_full.tar.gz",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.0/cc-remote_v0.3.0_linux_arm64_full.tar.gz.sha256"
     }
   },
   "default_task": "create-session",
