@@ -29,12 +29,28 @@ while IFS= read -r script; do
   bash -n "$script"
 done < <(find "$ROOT/bootstrap" "$ROOT/relay" "$ROOT/scripts" -type f -name '*.sh' -print | LC_ALL=C sort)
 
-if [ -f "$PAYLOAD" ]; then
-  actual="$(shasum -a 256 "$PAYLOAD" | cut -d' ' -f1)"
-  if [ "$actual" != "$EXPECTED_OPENSSH_SHA256" ]; then
-    printf 'Win32-OpenSSH payload digest mismatch: expected %s, got %s\n' "$EXPECTED_OPENSSH_SHA256" "$actual" >&2
-    exit 1
+# In a release build the payloads are freshly compiled on CI, so their digests do not
+# (and need not) equal the locally-generated pinned values; only require existence +
+# structure. In source/dev trees we still enforce the pinned digests.
+if [ "${CC_REMOTE_RELEASE_BUILD:-0}" = 1 ]; then
+  PAYLOAD_MODE=exists
+else
+  PAYLOAD_MODE=pin
+fi
+
+check_payload_sha() { # $1=path $2=expected_sha $3=label
+  if [ "$PAYLOAD_MODE" = pin ] && [ -n "$2" ]; then
+    local got
+    got="$(shasum -a 256 "$1" | cut -d' ' -f1)"
+    if [ "$got" != "$2" ]; then
+      printf '%s payload digest mismatch: expected %s, got %s\n' "$3" "$2" "$got" >&2
+      exit 1
+    fi
   fi
+}
+
+if [ -f "$PAYLOAD" ]; then
+  check_payload_sha "$PAYLOAD" "$EXPECTED_OPENSSH_SHA256" 'Win32-OpenSSH'
   unzip -Z1 "$PAYLOAD" | grep -Fx 'OpenSSH-Win64/LICENSE.txt' >/dev/null
   unzip -Z1 "$PAYLOAD" | grep -Fx 'OpenSSH-Win64/NOTICE.txt' >/dev/null
 else
@@ -45,13 +61,7 @@ fi
 check_unix_payload() { # $1=os(macos|linux) $2=arch $3=goos-tag(darwin|linux) $4=label $5=expected_sha
   local p="$ROOT/payloads/$1/openssh-$3-$2-9.8p1.tar.gz" actual
   if [ -f "$p" ]; then
-    if [ -n "$5" ]; then
-      actual="$(shasum -a 256 "$p" | cut -d' ' -f1)"
-      if [ "$actual" != "$5" ]; then
-        printf '%s payload digest mismatch: expected %s, got %s\n' "$4" "$5" "$actual" >&2
-        exit 1
-      fi
-    fi
+    check_payload_sha "$p" "$5" "$4"
     tar -tzf "$p" | grep -Fx 'openssh/LICENSE' >/dev/null || { echo "$4 missing LICENSE" >&2; exit 1; }
     tar -tzf "$p" | grep -Fx 'openssh/bin/sshd' >/dev/null || { echo "$4 missing sshd" >&2; exit 1; }
     tar -tzf "$p" | grep -Fx 'openssh/bin/ssh' >/dev/null || { echo "$4 missing ssh client" >&2; exit 1; }

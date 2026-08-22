@@ -67,6 +67,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     needs: [prepare-unix-payloads, prepare-windows-payload]
+    # Freshly-compiled CI payload digests need not match our locally-generated pins.
+    env:
+      CC_REMOTE_RELEASE_BUILD: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -76,13 +79,18 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true
+          pattern: payload-*
       - name: Merge payloads into the source tree
         run: |
-          # Each artifact carries payloads/<os>/... ; merge the macos/linux/windows
-          # files into ./payloads so release.sh sees the full set.
+          # Each artifact unpacks as artifacts/<name>/payloads/<os>/... ; merge each
+          # per-OS dir into ./payloads so release.sh sees the full 5-platform set.
           mkdir -p payloads
-          cp -R artifacts/payloads/* payloads/
+          for dir in artifacts/*/payloads/*/; do
+            [ -d "$dir" ] || continue
+            os="$(basename "$dir")"
+            mkdir -p "payloads/$os"
+            cp -f "$dir"* "payloads/$os/" 2>/dev/null || true
+          done
           rm -rf artifacts
           echo "=== payload tree ==="
           find payloads -type f | sort

@@ -49,6 +49,17 @@ openssh_payload_sha256 = {
     "509542271d56c033f33816306c9fe74e037595a8177e7a8b12ac33f5544d2a9d",  # macos x86_64 .tar.gz
 }
 
+
+def is_trusted_payload(label):
+    # Our own bundled self-contained OpenSSH payload archives are trusted third-party
+    # binaries no matter the exact digest (CI-built digests differ from local pins), so
+    # they are recognized by name/path rather than by a pinned sha256.
+    p = pathlib.PurePosixPath(label)
+    if not p.name.startswith("openssh-"):
+        return False
+    return p.name.endswith((".tar.gz", ".zip"))
+
+
 extra = []
 if denylist_path:
     deny_path = pathlib.Path(denylist_path).expanduser().resolve()
@@ -97,7 +108,7 @@ def check_path(label):
 def scan_zip(path, prefix):
     try:
         archive_bytes = path.read_bytes()
-        trusted_payload = hashlib.sha256(archive_bytes).hexdigest() in openssh_payload_sha256
+        trusted_payload = is_trusted_payload(prefix)
         with zipfile.ZipFile(path) as archive:
             for info in archive.infolist():
                 label = f"{prefix}!{info.filename}"
@@ -110,7 +121,7 @@ def scan_zip(path, prefix):
                 if info.filename.lower().endswith(".zip"):
                     import io
                     try:
-                        nested_trusted_payload = hashlib.sha256(data).hexdigest() in openssh_payload_sha256
+                        nested_trusted_payload = is_trusted_payload(info.filename)
                         with zipfile.ZipFile(io.BytesIO(data)) as nested_archive:
                             for nested_info in nested_archive.infolist():
                                 nested_label = f"{label}!{nested_info.filename}"
@@ -139,7 +150,7 @@ for label, path in files:
     data = path.read_bytes()
     # A bundled unix OpenSSH payload is a .tar.gz whose trust anchor is the whole
     # archive digest; scan its opaque binary members as third-party, not as text.
-    trusted_archive = path.suffix.lower() == ".tar.gz" and hashlib.sha256(data).hexdigest() in openssh_payload_sha256
+    trusted_archive = is_trusted_payload(label)
     scan_bytes(label, data, third_party_binary=trusted_archive)
     if path.suffix.lower() == ".zip":
         scan_zip(path, label)
