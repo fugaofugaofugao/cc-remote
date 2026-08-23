@@ -4,6 +4,8 @@
 
 `cc-remote` creates time-bounded SSH access for authorized remote support. A controlled Windows, macOS, or Linux machine runs a generated one-shot launcher, establishes a restricted reverse SSH tunnel to a public Linux/OpenSSH relay that **you control**, and prints a verified `CC_REMOTE_READY` line. The operator connects with fresh per-session keys.
 
+Starting in `v0.3.0`, macOS and Linux bundle a self-contained OpenSSH just like Windows: the controlled machine runs an **isolated standalone `sshd`** on its own session `local_ssh_port` with session-scoped host keys, and builds the reverse tunnel with the **bundled `ssh`** client. It never depends on the machine's own openssh components, and it never touches the system `sshd` / Remote Login / launchd — on ARM **and** x86. See the macOS/Linux execution model below and [docs/payloads.md](docs/payloads.md).
+
 This project is for consent-based maintenance. It is not a persistence or unattended-access product.
 
 ## Security model
@@ -302,6 +304,37 @@ Give the agent the authorized target scope, platform, relay you control, session
 
 Do not blanket-approve filesystem, subprocess, SSH, or network access. A permission request is not evidence that a command is safe; review the exact command and scope.
 
+## macOS and Linux execution model
+
+On macOS and Linux the generated launcher runs `bootstrap.sh` with root (macOS
+prompts once for the login password; Linux requires root authorization). `v0.3.0`
+ships a **self-contained OpenSSH** payload bundled with the runtime archive:
+
+- The bundled payload is installed to a fixed baked prefix (macOS
+  `/usr/local/cc-remote/openssh`, Linux `/opt/cc-remote/openssh`) and verified by
+  SHA-256 against the release.
+- bootstrap starts an **isolated standalone `sshd`** on the session's
+  `local_ssh_port` (default `22000 + session_id % 1000`), with **session-scoped
+  host keys** and an isolated `authorized_keys`, all under the session directory.
+  It does **not** enable the system Remote Login, does **not** touch the system
+  `sshd`, and does **not** manage launchd or systemd.
+- The reverse tunnel is established with the **bundled `ssh`** client:
+  `-R 127.0.0.1:<remote_port>:127.0.0.1:<local_ssh_port>` — no system `ssh` is
+  used.
+- The standalone sshd binds **loopback only** (`127.0.0.1`), disables password
+  authentication, and accepts only the session's per-session public key — it is
+  reachable only through the reverse tunnel, never exposed on the LAN/WAN.
+
+Because the standalone sshd is session-owned with its own port and keys, cleanup
+stops only this session's sshd and tunnel and leaves any pre-existing system
+openssh untouched.
+
+Logs:
+```text
+/var/tmp/cc-remote/<session-id>/bootstrap.log
+/var/tmp/cc-remote/<session-id>/tunnel.log
+```
+
 ## Windows execution model
 
 The Windows `.cmd` launcher requests UAC and runs two distinct phases:
@@ -342,13 +375,21 @@ The binary is written to `dist/cc-remote` (`dist/cc-remote.exe` for a Windows ta
 go run ./cmd/cc-remote --help
 ```
 
-For Windows launcher generation from source-only checkouts, prepare the optional pinned Win32-OpenSSH payload first:
+Offline payload archives are required to generate self-contained launchers. For
+Windows, prepare the pinned Win32-OpenSSH payload; for macOS/Linux, prepare the
+self-contained OpenSSH payload for the target OS/arch (darwin or linux × arm64 or
+x86_64):
 
 ```sh
 ./scripts/prepare-windows-openssh.sh
+./scripts/prepare-unix-openssh.sh --os darwin --arch arm64
+./scripts/prepare-unix-openssh.sh --os linux  --arch x86_64
 ./scripts/test.sh
 ./scripts/build.sh
 ```
+
+In a source-only tree (no payload archives) the CLI still prints `doctor` results,
+but self-contained launcher generation requires the payloads to be present.
 
 ## Documentation
 

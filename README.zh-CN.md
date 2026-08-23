@@ -232,7 +232,7 @@ Windows 启动器会运行两个阶段：
 
 ### macOS
 
-发送生成的 `.command`。对方双击运行，输入一次 Mac 登录密码。启动器会安装**内置的自包含 OpenSSH**（`/usr/local/cc-remote/openssh`），在独立的 `local_ssh_port` 上启动隔离的独立 sshd（带会话专属主机密钥），并用内置 `ssh` 客户端建立反向隧道——完全不依赖本机 openssh 组件，也不触碰系统 Remote Login / 系统 sshd。
+发送生成的 `.command`。对方双击运行，输入一次 Mac 登录密码。启动器会安装**内置的自包含 OpenSSH**（`/usr/local/cc-remote/openssh`），在独立的 `local_ssh_port`（默认 `22000 + session_id % 1000`）上启动隔离的独立 sshd（带会话专属主机密钥）；独立 sshd **只监听 `127.0.0.1` loopback 并禁用密码登录**，只能通过反向隧道访问、不暴露到局域网/公网；用内置 `ssh` 客户端建立反向隧道——完全不依赖本机 openssh 组件，也不触碰系统 Remote Login / 系统 sshd。
 
 日志位置：
 
@@ -243,7 +243,7 @@ Windows 启动器会运行两个阶段：
 
 ### Linux
 
-发送生成的 `.sh`，受控端需要 root 授权运行。启动器会安装**内置的自包含 OpenSSH**（`/opt/cc-remote/openssh`），在独立的 `local_ssh_port` 上启动隔离的独立 sshd，并用内置 `ssh` 客户端建立隧道——不依赖本机 openssh 组件、不联网下载软件包，且不触碰系统 sshd（22 端口）。
+发送生成的 `.sh`，受控端需要 root 授权运行。启动器会安装**内置的自包含 OpenSSH**（`/opt/cc-remote/openssh`），在独立的 `local_ssh_port`（默认 `22000 + session_id % 1000`）上启动隔离的独立 sshd（独立 sshd **只监听 `127.0.0.1`并禁用密码**，只接受本次会话公钥），并用内置 `ssh` 客户端建立隧道——不依赖本机 openssh 组件、不联网下载软件包，且不触碰系统 sshd（22 端口）。
 
 ## 5. 注册 READY 并连接
 
