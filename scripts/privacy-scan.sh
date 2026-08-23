@@ -116,7 +116,13 @@ def scan_zip(path, prefix):
                 if info.is_dir():
                     continue
                 data = archive.read(info)
-                third_party_binary = trusted_payload and info.filename.lower().endswith((".exe", ".dll", ".json", ".psd1"))
+                # A member that is itself a bundled OpenSSH payload archive
+                # (openssh-*.tar.gz / openssh-*.zip) is an opaque third-party
+                # binary: treat its compressed bytes as third-party so we do not
+                # flag random byte sequences inside cross-compiled binaries as
+                # public IPv4 literals.
+                member_is_payload = is_trusted_payload(info.filename)
+                third_party_binary = member_is_payload or (trusted_payload and info.filename.lower().endswith((".exe", ".dll", ".json", ".psd1")))
                 scan_bytes(label, data, third_party_binary=third_party_binary)
                 if info.filename.lower().endswith(".zip"):
                     import io
