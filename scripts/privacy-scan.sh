@@ -60,6 +60,17 @@ def is_trusted_payload(label):
     return p.name.endswith((".tar.gz", ".zip"))
 
 
+def is_trusted_runtime_archive(label):
+    # Platform "full" runtime archives (e.g. cc-remote_v0.3.1_linux_arm64_full.tar.gz
+    # / ..._win.zip) are built release artifacts that embed the bundled OpenSSH
+    # payload. Their compression may contain ad-hoc byte sequences (e.g. a
+    # cross-compiled binary producing a 4-byte run that matches the public-IPv4
+    # regex), so treat the archive itself as a trusted third-party binary; their
+    # individual text members are still scanned for real secrets.
+    p = pathlib.PurePosixPath(label)
+    return bool(re.match(r"^cc-remote_.+_full\.(?:tar\.gz|zip)$", p.name, re.I))
+
+
 extra = []
 if denylist_path:
     deny_path = pathlib.Path(denylist_path).expanduser().resolve()
@@ -108,7 +119,7 @@ def check_path(label):
 def scan_zip(path, prefix):
     try:
         archive_bytes = path.read_bytes()
-        trusted_payload = is_trusted_payload(prefix)
+        trusted_payload = is_trusted_payload(prefix) or is_trusted_runtime_archive(prefix)
         with zipfile.ZipFile(path) as archive:
             for info in archive.infolist():
                 label = f"{prefix}!{info.filename}"
@@ -154,9 +165,10 @@ else:
 for label, path in files:
     check_path(label)
     data = path.read_bytes()
-    # A bundled unix OpenSSH payload is a .tar.gz whose trust anchor is the whole
-    # archive digest; scan its opaque binary members as third-party, not as text.
-    trusted_archive = is_trusted_payload(label)
+    # A bundled unix OpenSSH payload, or a platform "full" runtime archive that
+    # embeds one, is trusted third-party/binary content: scan its opaque bytes as
+    # third-party, not as text, to avoid flagging random byte sequences as IPs.
+    trusted_archive = is_trusted_payload(label) or is_trusted_runtime_archive(label)
     scan_bytes(label, data, third_party_binary=trusted_archive)
     if path.suffix.lower() == ".zip":
         scan_zip(path, label)
