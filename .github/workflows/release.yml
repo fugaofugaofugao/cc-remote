@@ -82,15 +82,23 @@ jobs:
           pattern: payload-*
       - name: Merge payloads into the source tree
         run: |
-          # Each artifact unpacks as artifacts/<name>/payloads/<os>/... ; merge each
-          # per-OS dir into ./payloads so release.sh sees the full 5-platform set.
+          # The unix prepare jobs upload `path: payloads/` (the whole tree), and
+          # download-artifact@v4 unpacks each artifact under artifacts/<name>/.
+          # That layout varies (flat vs nested), so instead of globbing a fixed
+          # path we locate every payload archive by filename and classify it by OS
+          # tag in the name. This is robust to whatever nesting the artifacts have.
           mkdir -p payloads
-          for dir in artifacts/*/payloads/*/; do
-            [ -d "$dir" ] || continue
-            os="$(basename "$dir")"
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            case "$f" in
+              *win64.zip) os=windows ;;
+              *darwin-*)  os=macos ;;
+              *linux-*)   os=linux ;;
+              *)          echo "::warning::unclassified payload $f"; continue ;;
+            esac
             mkdir -p "payloads/$os"
-            cp -f "$dir"* "payloads/$os/" 2>/dev/null || true
-          done
+            cp -f "$f" "payloads/$os/"
+          done < <(find artifacts -type f \( -name 'openssh-*.tar.gz' -o -name 'openssh-win64.zip' \) | LC_ALL=C sort)
           rm -rf artifacts
           echo "=== payload tree ==="
           find payloads -type f | sort
