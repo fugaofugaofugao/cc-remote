@@ -7,18 +7,18 @@ For normal install-and-use operation, install a full runtime archive from the Gi
 Release page:
 
 ```text
-https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.3.1
+https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.3.2
 ```
 
 Direct runtime download links:
 
 | Operator OS / arch | Runtime archive | SHA256 file |
 | --- | --- | --- |
-| Windows x86_64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_windows_amd64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_windows_amd64_full.zip.sha256 |
-| macOS Apple Silicon | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_darwin_arm64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_darwin_arm64_full.zip.sha256 |
-| macOS Intel | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_darwin_amd64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_darwin_amd64_full.zip.sha256 |
-| Linux x86_64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_linux_amd64_full.tar.gz | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_linux_amd64_full.tar.gz.sha256 |
-| Linux ARM64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_linux_arm64_full.tar.gz | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_linux_arm64_full.tar.gz.sha256 |
+| Windows x86_64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_windows_amd64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_windows_amd64_full.zip.sha256 |
+| macOS Apple Silicon | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_darwin_arm64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_darwin_arm64_full.zip.sha256 |
+| macOS Intel | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_darwin_amd64_full.zip | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_darwin_amd64_full.zip.sha256 |
+| Linux x86_64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_linux_amd64_full.tar.gz | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_linux_amd64_full.tar.gz.sha256 |
+| Linux ARM64 | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_linux_arm64_full.tar.gz | https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_linux_arm64_full.tar.gz.sha256 |
 
 After extracting a runtime archive, run the included installer and verify with `cc-remote doctor --json`. The installer is user-local and does not create sessions, keys, relay authorization, services, or `~/.cc-remote` records.
 
@@ -145,7 +145,10 @@ Logs:
 
 ### Linux
 
-Send the generated `.sh` and run it with root authorization. The bootstrap installs the
+Send the generated `.sh` and run it with root authorization (from an interactive
+terminal the launcher prompts for the sudo password; unattended, non-root runs exit
+with guidance to re-run from a root shell instead of failing inside `sudo`). The
+bootstrap installs the
 **bundled self-contained OpenSSH** under `/opt/cc-remote/openssh`, starts an isolated
 standalone sshd on `local_ssh_port` with session-scoped host keys, and builds the
 reverse tunnel with the bundled `ssh` client — no dependency on the machine's own
@@ -208,57 +211,57 @@ The operator CLI removes relay authorization only if it installed it. A manually
 Copy this prompt when another AI/operator should install cc-remote and generate a single reusable launcher from the GitHub Release:
 
 ```text
-Install and use cc-remote v0.3.1 from GitHub Release. Do not clone source code, do not run go build, and do not rewrite the launcher scripts.
+Install and use cc-remote v0.3.2 from GitHub Release. Do not clone source code, do not run go build, and do not rewrite the launcher scripts.
 
 Release page:
-https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.3.1
+https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.3.2
 
 First install the operator CLI from exactly one matching runtime archive. Detect this operator machine's OS/architecture, select the single matching block below, run the commands as-is, and stop if SHA256 verification or doctor fails. Do not use GitHub source archives for normal operation. Detection commands: macOS/Linux run `uname -s` and `uname -m`; Windows PowerShell run `$env:PROCESSOR_ARCHITECTURE`. Mapping: Darwin arm64=macOS Apple Silicon, Darwin x86_64=macOS Intel, Linux x86_64=Linux x86_64, Linux aarch64/arm64=Linux ARM64, Windows AMD64=Windows x86_64.
 
 macOS Apple Silicon (Darwin arm64):
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_darwin_arm64_full.zip
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_darwin_arm64_full.zip.sha256
-  shasum -a 256 -c cc-remote_v0.3.1_darwin_arm64_full.zip.sha256
-  unzip cc-remote_v0.3.1_darwin_arm64_full.zip
-  cd cc-remote_v0.3.1_darwin_arm64_full
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_darwin_arm64_full.zip
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_darwin_arm64_full.zip.sha256
+  shasum -a 256 -c cc-remote_v0.3.2_darwin_arm64_full.zip.sha256
+  unzip cc-remote_v0.3.2_darwin_arm64_full.zip
+  cd cc-remote_v0.3.2_darwin_arm64_full
   ./install.sh
   "$HOME/.local/share/cc-remote/cc-remote" doctor --json
 
 macOS Intel (Darwin x86_64):
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_darwin_amd64_full.zip
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_darwin_amd64_full.zip.sha256
-  shasum -a 256 -c cc-remote_v0.3.1_darwin_amd64_full.zip.sha256
-  unzip cc-remote_v0.3.1_darwin_amd64_full.zip
-  cd cc-remote_v0.3.1_darwin_amd64_full
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_darwin_amd64_full.zip
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_darwin_amd64_full.zip.sha256
+  shasum -a 256 -c cc-remote_v0.3.2_darwin_amd64_full.zip.sha256
+  unzip cc-remote_v0.3.2_darwin_amd64_full.zip
+  cd cc-remote_v0.3.2_darwin_amd64_full
   ./install.sh
   "$HOME/.local/share/cc-remote/cc-remote" doctor --json
 
 Linux x86_64:
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_linux_amd64_full.tar.gz
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_linux_amd64_full.tar.gz.sha256
-  sha256sum -c cc-remote_v0.3.1_linux_amd64_full.tar.gz.sha256
-  tar -xzf cc-remote_v0.3.1_linux_amd64_full.tar.gz
-  cd cc-remote_v0.3.1_linux_amd64_full
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_linux_amd64_full.tar.gz
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_linux_amd64_full.tar.gz.sha256
+  sha256sum -c cc-remote_v0.3.2_linux_amd64_full.tar.gz.sha256
+  tar -xzf cc-remote_v0.3.2_linux_amd64_full.tar.gz
+  cd cc-remote_v0.3.2_linux_amd64_full
   ./install.sh
   "$HOME/.local/share/cc-remote/cc-remote" doctor --json
 
 Linux ARM64 (aarch64/arm64):
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_linux_arm64_full.tar.gz
-  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_linux_arm64_full.tar.gz.sha256
-  sha256sum -c cc-remote_v0.3.1_linux_arm64_full.tar.gz.sha256
-  tar -xzf cc-remote_v0.3.1_linux_arm64_full.tar.gz
-  cd cc-remote_v0.3.1_linux_arm64_full
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_linux_arm64_full.tar.gz
+  curl -L -O https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_linux_arm64_full.tar.gz.sha256
+  sha256sum -c cc-remote_v0.3.2_linux_arm64_full.tar.gz.sha256
+  tar -xzf cc-remote_v0.3.2_linux_arm64_full.tar.gz
+  cd cc-remote_v0.3.2_linux_arm64_full
   ./install.sh
   "$HOME/.local/share/cc-remote/cc-remote" doctor --json
 
 Windows x86_64 PowerShell:
-  Invoke-WebRequest -Uri 'https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_windows_amd64_full.zip' -OutFile '.\cc-remote_v0.3.1_windows_amd64_full.zip'
-  Invoke-WebRequest -Uri 'https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_windows_amd64_full.zip.sha256' -OutFile '.\cc-remote_v0.3.1_windows_amd64_full.zip.sha256'
-  $Expected = (Get-Content '.\cc-remote_v0.3.1_windows_amd64_full.zip.sha256').Split(' ')[0].ToLowerInvariant()
-  $Actual = (Get-FileHash '.\cc-remote_v0.3.1_windows_amd64_full.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+  Invoke-WebRequest -Uri 'https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_windows_amd64_full.zip' -OutFile '.\cc-remote_v0.3.2_windows_amd64_full.zip'
+  Invoke-WebRequest -Uri 'https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_windows_amd64_full.zip.sha256' -OutFile '.\cc-remote_v0.3.2_windows_amd64_full.zip.sha256'
+  $Expected = (Get-Content '.\cc-remote_v0.3.2_windows_amd64_full.zip.sha256').Split(' ')[0].ToLowerInvariant()
+  $Actual = (Get-FileHash '.\cc-remote_v0.3.2_windows_amd64_full.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($Actual -ne $Expected) { throw "SHA256 mismatch: $Actual" }
-  Expand-Archive '.\cc-remote_v0.3.1_windows_amd64_full.zip'
-  cd '.\cc-remote_v0.3.1_windows_amd64_full'
+  Expand-Archive '.\cc-remote_v0.3.2_windows_amd64_full.zip'
+  cd '.\cc-remote_v0.3.2_windows_amd64_full'
   .\install.ps1 -AddToPath
   & "$env:LOCALAPPDATA\Programs\cc-remote\cc-remote.exe" doctor --json
 
@@ -280,6 +283,7 @@ Verify the saved relay profile:
 Create one single-platform launcher with JSON output. The saved relay profile is reused automatically:
   cc-remote create --json --name <target-name> --platform <windows|macos|linux> --launcher-format <cmd|command|sh> --handoff-mode embedded --target-user auto --idle-timeout 12h --max-lifetime 12h
 Platform launcher formats: Windows=cmd, macOS=command, Linux=sh.
+Do not pass --payload-root after a normal install; the bundled OpenSSH payloads resolve from the install root automatically, from any working directory.
 
 By default create does not modify the relay. Install the exact relay_authorized_key_line from create --json into the relay user's authorized_keys, preserving unrelated keys. Only use --install-relay=true when the operator explicitly authorizes that relay mutation for this session.
 Send only files listed in share_with_recipient to the authorized controlled machine. Do not send files listed in operator_only.

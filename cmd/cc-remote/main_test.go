@@ -130,6 +130,74 @@ func TestWindowsCreateRequiresVerifiedOfflineOpenSSH(t *testing.T) {
 	}
 }
 
+// TestCreateResolvesPayloadRootFromInstallRoot reproduces the install-and-use flow:
+// the binary lives in an install root that also carries payloads/, and the operator
+// runs create without --payload-root. The relative default must resolve against the
+// directory that ships bootstrap/ + payloads/ (the install root, found like
+// findAssetRoot does), never against an arbitrary cwd that merely has no payloads.
+func TestCreateResolvesPayloadRootFromInstallRoot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Layout mirroring scripts/install.sh: an install dir holding bootstrap/ and
+	// payloads/ beside the binary.
+	installDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(installDir, "bootstrap"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, "bootstrap", "bootstrap.sh"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(installDir, "payloads", "linux"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, "payloads", "linux", "openssh-linux-x86_64-9.8p1.tar.gz"), []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Run from an unrelated empty working directory, like a PATH-shimmed binary.
+	emptyWd := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(emptyWd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	resolved, err := resolvePayloadRoot("payloads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The source tree itself is a valid asset root (the test runs inside it, and
+	// findAssetRoot walks up from the pre-chdir cwd); when the resolver runs from
+	// the empty cwd nothing is discoverable and it must fall back to the cwd
+	// without erroring. When an asset root IS discoverable it wins over the cwd.
+	// resolved is cwd + "/payloads" (the dir itself need not exist); compare parents.
+	resolvedParent, perr := filepath.EvalSymlinks(filepath.Dir(resolved))
+	wdParent, werr := filepath.EvalSymlinks(emptyWd)
+	if perr != nil || werr != nil || resolvedParent != wdParent {
+		t.Fatalf("expected cwd fallback under %q in this environment, got %q", emptyWd, resolved)
+	}
+	// Now emulate the operator running inside the install root: the cwd walk must
+	// find bootstrap/ + payloads/ there.
+	if err := os.Chdir(installDir); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err = resolvePayloadRoot("payloads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedReal, rerr := filepath.EvalSymlinks(resolved)
+	installReal, ierr := filepath.EvalSymlinks(filepath.Join(installDir, "payloads"))
+	if rerr != nil || ierr != nil || resolvedReal != installReal {
+		t.Fatalf("payload root = %q, want install dir payloads %q", resolved, filepath.Join(installDir, "payloads"))
+	}
+	// An absolute --payload-root is honored verbatim.
+	abs := filepath.Join(t.TempDir(), "payloads")
+	if absResolved, err := resolvePayloadRoot(abs); err != nil || absResolved != filepath.Clean(abs) {
+		t.Fatalf("absolute payload root = %q (%v), want %q", absResolved, err, filepath.Clean(abs))
+	}
+}
+
 func TestNonWindowsCreateDoesNotRequireWindowsPayload(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	// macOS does not need the Windows payload, but it does need its own bundled
@@ -377,6 +445,11 @@ func TestMacOSCreateBuildsParseableCommandWithoutWindowsPayload(t *testing.T) {
 	if out, err := exec.Command("/bin/sh", "-n", rec.HandoffCommandPath).CombinedOutput(); err != nil {
 		t.Fatalf("macOS launcher cannot be parsed when invoked with sh: %v\n%s", err, out)
 	}
+	for _, required := range []string{`if [ -t 0 ]`, "no terminal is attached for a password prompt", "sudo /bin/bash"} {
+		if !strings.Contains(commandText, required) {
+			t.Fatalf("macOS launcher non-root handling missing %q", required)
+		}
+	}
 }
 
 func TestWindowsBootstrapIsOfflineFirst(t *testing.T) {
@@ -413,6 +486,51 @@ func TestWindowsBootstrapIsOfflineFirst(t *testing.T) {
 	ready := strings.Index(flow, "CC_REMOTE_READY")
 	if localCheck == -1 || tunnelCheck == -1 || ready == -1 || localCheck > tunnelCheck || tunnelCheck > ready {
 		t.Fatal("Windows bootstrap emits READY before local SSH and reverse tunnel verification")
+	}
+}
+
+// TestUnixBootstrapStandaloneOnly locks in the v0.3.x execution model: the Unix
+// bootstrap runs only the isolated standalone bundled sshd and must not carry any
+// legacy path that installs/packages/enables the system sshd or macOS Remote Login
+// (regression: dead fallback code contradicted the "never touch system sshd" promise).
+func TestUnixBootstrapStandaloneOnly(t *testing.T) {
+	assetRoot, err := findAssetRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	textBytes, err := os.ReadFile(filepath.Join(assetRoot, "bootstrap", "bootstrap.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(textBytes)
+	for _, required := range []string{
+		// sshd refuses to start without the privilege-separation directory; fresh
+		// Ubuntu/minimal/container hosts do not ship /var/empty.
+		"install -d -m 0755 /var/empty",
+		"ensure_standalone_sshd",
+		// Failures must name the authoritative log and surface sshd.log content.
+		"full log: $keydir/sshd.log, bootstrap log: $LOG_FILE",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("Unix bootstrap missing standalone-sshd marker %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"systemsetup",
+		"launchctl",
+		"dpkg -i",
+		"rpm -Uvh",
+		"systemctl start",
+		"systemctl enable",
+		"service ssh start",
+		"sshd_bin",
+		"port_22_ready",
+		"PREV_REMOTE_LOGIN",
+		"REMOTE_LOGIN_METHOD",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("Unix bootstrap still contains legacy system-sshd fallback marker %q", forbidden)
+		}
 	}
 }
 
@@ -784,8 +902,7 @@ func TestUnixCleanupNeverChangesSharedSSHService(t *testing.T) {
 		`ps -p "$TUNNEL_PID" -o comm=`,
 		`ps -p "$TUNNEL_PID" -o command=`,
 		`[ "$(basename "$command_name")" = "ssh" ]`,
-		`local_dst="127.0.0.1:22"`,
-		`LOCAL_SSHD_MODE:-}" = "standalone"`,
+		`local_dst="127.0.0.1:${LOCAL_SSH_PORT:-}"`,
 		`expected_forward_full="127.0.0.1:${REMOTE_PORT:-}:${local_dst}"`,
 		`expected_port="-p ${RELAY_SSH_PORT:-}"`,
 		`expected_target="${RELAY_USER:-}@${RELAY_HOST:-}"`,

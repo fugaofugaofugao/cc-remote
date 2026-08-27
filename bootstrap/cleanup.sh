@@ -17,12 +17,8 @@ if [ -n "${AUTH_KEYS:-}" ] && [ -f "$AUTH_KEYS" ]; then
   echo "removed temporary authorized_keys marker cc-remote:${SESSION_ID}"
 fi
 
-# Local forward target depends on the sshd we stood up: standalone bundled sshd port,
-# or the pre-existing system sshd on 22.
-local_dst="127.0.0.1:22"
-if [ "${LOCAL_SSHD_MODE:-}" = "standalone" ] && [ -n "${LOCAL_SSH_PORT:-}" ]; then
-  local_dst="127.0.0.1:${LOCAL_SSH_PORT}"
-fi
+# Local forward target is the standalone bundled sshd port this session stood up.
+local_dst="127.0.0.1:${LOCAL_SSH_PORT:-}"
 
 if [ -n "${TUNNEL_PID:-}" ] && kill -0 "$TUNNEL_PID" >/dev/null 2>&1; then
   command_name="$(ps -p "$TUNNEL_PID" -o comm= 2>/dev/null || true)"
@@ -51,7 +47,7 @@ fi
 
 # Stop only the standalone bundled sshd that THIS session started. The system sshd /
 # Remote Login / shared service is never touched (it is outside session ownership).
-if [ "${LOCAL_SSHD_MODE:-}" = "standalone" ] && [ -n "${LOCAL_SSHD_PID:-}" ] && kill -0 "$LOCAL_SSHD_PID" >/dev/null 2>&1; then
+if [ -n "${LOCAL_SSHD_PID:-}" ] && kill -0 "$LOCAL_SSHD_PID" >/dev/null 2>&1; then
   pcmd="$(ps -p "$LOCAL_SSHD_PID" -o command= 2>/dev/null || true)"
   if printf '%s\n' "$pcmd" | grep -F -- "sshd" >/dev/null &&
      printf '%s\n' "$pcmd" | grep -F -- "$SESSION_ID" >/dev/null 2>&1 ||

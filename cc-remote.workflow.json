@@ -1,27 +1,27 @@
 {
   "version": 1,
   "repo": "fugaofugaofugao/cc-remote",
-  "release_url": "https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.3.1",
+  "release_url": "https://github.com/fugaofugaofugao/cc-remote/releases/tag/v0.3.2",
   "direct_downloads": {
     "windows_amd64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_windows_amd64_full.zip",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_windows_amd64_full.zip.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_windows_amd64_full.zip",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_windows_amd64_full.zip.sha256"
     },
     "darwin_arm64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_darwin_arm64_full.zip",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_darwin_arm64_full.zip.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_darwin_arm64_full.zip",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_darwin_arm64_full.zip.sha256"
     },
     "darwin_amd64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_darwin_amd64_full.zip",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_darwin_amd64_full.zip.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_darwin_amd64_full.zip",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_darwin_amd64_full.zip.sha256"
     },
     "linux_amd64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_linux_amd64_full.tar.gz",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_linux_amd64_full.tar.gz.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_linux_amd64_full.tar.gz",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_linux_amd64_full.tar.gz.sha256"
     },
     "linux_arm64": {
-      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_linux_arm64_full.tar.gz",
-      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.1/cc-remote_v0.3.1_linux_arm64_full.tar.gz.sha256"
+      "archive": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_linux_arm64_full.tar.gz",
+      "sha256": "https://github.com/fugaofugaofugao/cc-remote/releases/download/v0.3.2/cc-remote_v0.3.2_linux_arm64_full.tar.gz.sha256"
     }
   },
   "default_task": "create-session",
@@ -61,6 +61,7 @@
       "default_flags": {"--install-relay": false, "--target-user": "auto", "--launcher-format": "default", "--handoff-mode": "embedded"},
       "single_launcher_defaults": {"windows": "cmd", "macos": "command", "linux": "sh"},
       "relay_defaults": "read from ~/.cc-remote/config.json; explicit create flags override saved profile",
+    "payload_resolution": "bundled payloads resolve from the install root that ships bootstrap/ and payloads/ next to the binary; pass --payload-root <dir> only when payloads live elsewhere (relative value: install root first, then working directory)",
       "requires_explicit_approval": ["--install-relay=true", "relay mutation", "controlled-side cleanup"],
       "machine_output": {"flag": "--json", "stdout": "pure JSON only", "secret_policy": "private-key paths and public fingerprints only; never private-key bodies"},
       "ready_acceptance": {"must_start_with": "CC_REMOTE_READY ", "must_match_session_record": true, "must_not_construct": true}

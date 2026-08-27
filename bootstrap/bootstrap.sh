@@ -90,41 +90,8 @@ print('payload verification ok')
 PY
 }
 
-service_active() {
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl is-active --quiet "$1"
-  else
-    service "$1" status >/dev/null 2>&1
-  fi
-}
 
-start_service() {
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl start "$1"
-  else
-    service "$1" start
-  fi
-}
 
-linux_ssh_service() {
-  local candidate
-  if command -v systemctl >/dev/null 2>&1; then
-    for candidate in sshd ssh; do
-      if systemctl cat "$candidate.service" >/dev/null 2>&1; then
-        printf '%s\n' "$candidate"
-        return
-      fi
-    done
-    return 1
-  fi
-  for candidate in sshd ssh; do
-    if service "$candidate" status >/dev/null 2>&1; then
-      printf '%s\n' "$candidate"
-      return
-    fi
-  done
-  return 1
-}
 
 # ---------------------------------------------------------------------------
 # Standalone bundled OpenSSH.
@@ -147,16 +114,6 @@ bundled_openssh_prefix() {
     printf '%s\n' "$HOME/.cc-remote/openssh"
   else
     printf '%s\n' "$HOME/cc-remote/openssh"
-  fi
-}
-
-# Ensure a pre-existing system sshd is not claimed or stopped. This only matters to
-# report the mode; the standalone sshd below is isolated regardless.
-existing_system_sshd_on_22() {
-  if [ "$(uname -s)" = "Linux" ]; then
-    port_22_ready
-  else
-    false
   fi
 }
 
@@ -239,6 +196,10 @@ PY
 ensure_standalone_sshd() {
   local keydir cfg
   ensure_bundled_openssh
+  # OpenSSH privilege-separation directory. Minimal/container images and fresh
+  # Ubuntu installs do not ship /var/empty and sshd refuses to start without it
+  # ("Missing privilege separation directory"). Safe when it already exists.
+  install -d -m 0755 /var/empty
   LOCAL_SSH_PORT="$(select_local_ssh_port "$LOCAL_SSH_PORT")"
   keydir="$STATE_ROOT/$SESSION_ID/sshd"
   # 711: traversable by the (non-root) target user so the isolated sshd, after it
@@ -267,172 +228,30 @@ LogLevel VERBOSE
 UsePAM no
 StrictModes no
 CONF
-  "$OPENSSH_BIN/sshd" -f "$cfg" -E "$keydir/sshd.log" || fail "standalone sshd failed to start (port $LOCAL_SSH_PORT)"
+  if ! "$OPENSSH_BIN/sshd" -f "$cfg" -E "$keydir/sshd.log"; then
+    # The authoritative log is the bootstrap log; surface why sshd refused to start
+    # (config, privilege separation dir, port binding) instead of a bare failure line.
+    log "Standalone sshd failed to start (port $LOCAL_SSH_PORT); last sshd.log lines:" >&2
+    tail -n 20 "$keydir/sshd.log" 2>/dev/null | while IFS= read -r line; do log "  $line" >&2; done
+    fail "standalone sshd failed to start (port $LOCAL_SSH_PORT); full log: $keydir/sshd.log, bootstrap log: $LOG_FILE"
+  fi
   sleep 1
   if [ -f "$keydir/sshd.pid" ]; then
     LOCAL_SSHD_PID="$(cat "$keydir/sshd.pid")"
   fi
-  port_in_use "$LOCAL_SSH_PORT" || fail "standalone sshd did not bind $LOCAL_SSH_PORT"
+  if ! port_in_use "$LOCAL_SSH_PORT"; then
+    log "Standalone sshd exited early (port $LOCAL_SSH_PORT); last sshd.log lines:" >&2
+    tail -n 20 "$keydir/sshd.log" 2>/dev/null | while IFS= read -r line; do log "  $line" >&2; done
+    fail "standalone sshd did not bind $LOCAL_SSH_PORT; full log: $keydir/sshd.log, bootstrap log: $LOG_FILE"
+  fi
   LOCAL_SSHD_MODE="standalone"
   log "Standalone sshd active on 127.0.0.1:$LOCAL_SSH_PORT (pid $LOCAL_SSHD_PID); isolated from the system ssh service."
 }
 
-ensure_linux_sshd() {
-  if command -v sshd >/dev/null 2>&1 || [ -x /usr/sbin/sshd ]; then
-    return
-  fi
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  case "${ID_LIKE:-$ID}" in
-    *debian*|*ubuntu*)
-      if compgen -G "$ROOT_DIR/payloads/linux/debian/*.deb" >/dev/null; then
-        dpkg -i "$ROOT_DIR"/payloads/linux/debian/*.deb
-      else
-        fail "OpenSSH Server is missing and no Debian/Ubuntu offline .deb payloads are bundled."
-      fi
-      ;;
-    *rhel*|*fedora*|*centos*)
-      if compgen -G "$ROOT_DIR/payloads/linux/rhel/*.rpm" >/dev/null; then
-        rpm -Uvh "$ROOT_DIR"/payloads/linux/rhel/*.rpm
-      else
-        fail "OpenSSH Server is missing and no RHEL/Rocky/CentOS offline .rpm payloads are bundled."
-      fi
-      ;;
-    *) fail "Unsupported Linux distribution for offline OpenSSH install: ${ID:-unknown}" ;;
-  esac
-}
 
-port_22_ready() {
-  if command -v nc >/dev/null 2>&1; then
-    nc -z -w 2 127.0.0.1 22 >/dev/null 2>&1
-  else
-    python3 - <<'PY'
-import socket
-s = socket.socket()
-s.settimeout(2)
-try:
-    s.connect(('127.0.0.1', 22))
-finally:
-    s.close()
-PY
-  fi
-}
 
-ensure_linux_ssh_ready() {
-  local ssh_service sshd_bin
-  ensure_linux_sshd
-  if port_22_ready; then
-    return
-  fi
-  if ssh_service="$(linux_ssh_service)"; then
-    service_active "$ssh_service" || start_service "$ssh_service"
-  else
-    sshd_bin="$(command -v sshd 2>/dev/null || true)"
-    [ -n "$sshd_bin" ] || sshd_bin=/usr/sbin/sshd
-    [ -x "$sshd_bin" ] || fail "OpenSSH Server is installed, but no sshd executable or service unit was found."
-    install -d -m 755 /run/sshd
-    "$sshd_bin" -t
-    "$sshd_bin"
-  fi
-  port_22_ready || fail "Local SSH service could not be started or local port 22 is not reachable."
-}
 
-remote_login_status() {
-  local output rc
-  if output="$(systemsetup -getremotelogin 2>&1)"; then
-    rc=0
-  else
-    rc=$?
-  fi
-  log "systemsetup status (exit $rc): $output" >&2
-  if [ "$rc" -eq 0 ] && printf '%s' "$output" | grep -qi 'on'; then
-    printf 'on\n'
-  elif [ "$rc" -eq 0 ] && printf '%s' "$output" | grep -qi 'off'; then
-    printf 'off\n'
-  else
-    printf 'unknown\n'
-  fi
-}
 
-ensure_macos_sshd() {
-  local status output rc plist
-  require_command systemsetup
-  require_command dscl
-  plist="/System/Library/LaunchDaemons/ssh.plist"
-  status="$(remote_login_status | tail -n 1)"
-  PREV_REMOTE_LOGIN="$status"
-  REMOTE_LOGIN_METHOD="existing"
-
-  if [ "$status" = "on" ] && port_22_ready; then
-    log "Remote Login is already enabled and local SSH port 22 is reachable."
-    return
-  fi
-
-  log "Enabling macOS Remote Login with systemsetup..."
-  if output="$(systemsetup -setremotelogin on 2>&1)"; then
-    rc=0
-  else
-    rc=$?
-  fi
-  if [ -n "$output" ]; then
-    log "systemsetup result (exit $rc): $output"
-  else
-    log "systemsetup returned no text (exit $rc)."
-  fi
-  if [ "$rc" -eq 0 ]; then
-    REMOTE_LOGIN_METHOD="systemsetup"
-  else
-    log "systemsetup could not enable Remote Login; trying the macOS launchd compatibility path."
-  fi
-
-  if ! port_22_ready; then
-    [ -f "$plist" ] || fail "macOS SSH launch daemon plist was not found: $plist"
-    output=""
-    if output="$(launchctl enable system/com.openssh.sshd 2>&1)"; then
-      rc=0
-    else
-      rc=$?
-    fi
-    [ -n "$output" ] && log "launchctl enable result (exit $rc): $output"
-
-    if ! port_22_ready; then
-      if output="$(launchctl bootstrap system "$plist" 2>&1)"; then
-        rc=0
-      else
-        rc=$?
-      fi
-      [ -n "$output" ] && log "launchctl bootstrap result (exit $rc): $output"
-    fi
-
-    if ! port_22_ready; then
-      if output="$(launchctl kickstart -k system/com.openssh.sshd 2>&1)"; then
-        rc=0
-      else
-        rc=$?
-      fi
-      [ -n "$output" ] && log "launchctl kickstart result (exit $rc): $output"
-    fi
-
-    if ! port_22_ready; then
-      if output="$(launchctl load -w "$plist" 2>&1)"; then
-        rc=0
-      else
-        rc=$?
-      fi
-      [ -n "$output" ] && log "launchctl load result (exit $rc): $output"
-    fi
-
-    if port_22_ready; then
-      REMOTE_LOGIN_METHOD="launchctl"
-      log "Remote Login was enabled through launchd compatibility mode."
-    else
-      fail "Remote Login could not be enabled after systemsetup and launchctl attempts (last exit $rc). Give Terminal Full Disk Access, then rerun this same file: System Settings > Privacy & Security > Full Disk Access > Terminal."
-    fi
-  fi
-
-  port_22_ready || fail "Remote Login reported enabled, but local SSH port 22 is not reachable."
-  log "Local SSH port 22 is reachable."
-}
 
 resolve_target_user() {
   local target_user="$1" console_user=""
@@ -463,32 +282,6 @@ resolve_target_user() {
   fail "Could not detect the signed-in user."
 }
 
-install_key() {
-  local target_user="$1" key="$2" home_dir group_name
-  case "$(uname -s)" in
-    Darwin)
-      home_dir="$(dscl . -read "/Users/$target_user" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
-      group_name="$(id -gn "$target_user" 2>/dev/null || echo staff)"
-      ;;
-    Linux)
-      home_dir="$(getent passwd "$target_user" | cut -d: -f6 || true)"
-      group_name="$(id -gn "$target_user" 2>/dev/null || echo "$target_user")"
-      ;;
-    *) home_dir=""; group_name="$target_user" ;;
-  esac
-  [ -n "$home_dir" ] && [ -d "$home_dir" ] || fail "Could not locate home directory for target user: $target_user"
-  install -d -m 700 -o "$target_user" -g "$group_name" "$home_dir/.ssh"
-  touch "$home_dir/.ssh/authorized_keys"
-  chmod 600 "$home_dir/.ssh/authorized_keys"
-  chown "$target_user:$group_name" "$home_dir/.ssh/authorized_keys" || true
-  if ! grep -q "cc-remote:$SESSION_ID" "$home_dir/.ssh/authorized_keys"; then
-    printf '\n%s\n' "$key" >> "$home_dir/.ssh/authorized_keys"
-  fi
-  grep -q "cc-remote:$SESSION_ID" "$home_dir/.ssh/authorized_keys" || fail "Temporary SSH key marker was not written."
-  AUTH_KEYS="$home_dir/.ssh/authorized_keys"
-  log "Installed the temporary session public key for user $target_user."
-}
-
 target_key_fingerprint() {
   python3 - "$MANIFEST" <<'PY'
 import base64, hashlib, json, sys
@@ -507,8 +300,6 @@ write_state() {
 SESSION_ID='$SESSION_ID'
 TARGET_USER='$TARGET_USER'
 AUTH_KEYS='$AUTH_KEYS'
-PREV_REMOTE_LOGIN='${PREV_REMOTE_LOGIN:-unknown}'
-REMOTE_LOGIN_METHOD='${REMOTE_LOGIN_METHOD:-unknown}'
 TUNNEL_PID='${TUNNEL_PID:-}'
 LOCAL_SSHD_PID='${LOCAL_SSHD_PID:-}'
 LOCAL_SSHD_MODE='${LOCAL_SSHD_MODE:-none}'
@@ -535,13 +326,8 @@ start_tunnel() {
   else
     fail "no ssh client available (bundled openssh missing and no system ssh)"
   fi
-  # Forward the relay reverse listener to the standalone bundled sshd port, or 22 as
-  # a fallback for pre-existing system sshd deployments.
-  if [ "$LOCAL_SSHD_MODE" = "standalone" ]; then
-    local_dst="127.0.0.1:$LOCAL_SSH_PORT"
-  else
-    local_dst="127.0.0.1:22"
-  fi
+  # Forward the relay reverse listener to the standalone bundled sshd port.
+  local_dst="127.0.0.1:$LOCAL_SSH_PORT"
   log "Connecting to restricted relay $RELAY_USER@$RELAY_HOST:$RELAY_SSH_PORT (client $(basename "$ssh_client"))..."
   "$ssh_client" -N \
     -i "$ROOT_DIR/keys/tunnel_ed25519" \
@@ -632,8 +418,6 @@ TARGET_KEY="$(json_get target_authorized_key)"
 TARGET_USER="$(resolve_target_user "$(json_get target_user)")"
 # Preferred port for the standalone bundled sshd; verified/overridden at run time.
 LOCAL_SSH_PORT="$(json_get local_ssh_port 2>/dev/null || true)"
-PREV_REMOTE_LOGIN="unknown"
-REMOTE_LOGIN_METHOD="unknown"
 AUTH_KEYS=""
 TUNNEL_PID=""
 

@@ -113,7 +113,7 @@ func create(args []string) error {
 	maxLifetime := fs.Duration("max-lifetime", 7*24*time.Hour, "hard safety lifetime for local record; 0 disables expiry")
 	legacyTTL := fs.Duration("ttl", 0, "deprecated alias for --max-lifetime")
 	idleTimeout := fs.Duration("idle-timeout", 2*time.Hour, "cleanup after this much time with no active SSH connection; 0 disables idle cleanup")
-	payloadRoot := fs.String("payload-root", "payloads", "offline payload root")
+	payloadRoot := fs.String("payload-root", "payloads", "offline payload root; relative paths resolve against the install root, then the working directory")
 	platform := fs.String("platform", "all", "launcher platform: windows, macos, linux, or all")
 	launcherFormat := fs.String("launcher-format", "default", "launcher format: default, cmd, ps1, both, sh, command, or all")
 	handoffMode := fs.String("handoff-mode", "embedded", "handoff mode: embedded or bundle")
@@ -168,7 +168,11 @@ func create(args []string) error {
 		return err
 	}
 	payloadPlatform := payloadPlatformForFormats(*platform, formats)
-	payloads, err := collectPlatformPayloads(*payloadRoot, payloadPlatform)
+	payloadRootResolved, err := resolvePayloadRoot(*payloadRoot)
+	if err != nil {
+		return err
+	}
+	payloads, err := collectPlatformPayloads(payloadRootResolved, payloadPlatform)
 	if err != nil {
 		return err
 	}
@@ -287,7 +291,7 @@ func create(args []string) error {
 		"idle-watch.ps1":      filepath.Join(assetRoot, "bootstrap", "idle-watch.ps1"),
 	}
 	for _, payload := range payloads {
-		src := filepath.Join(*payloadRoot, strings.TrimPrefix(payload.Path, "payloads/"))
+		src := filepath.Join(payloadRootResolved, strings.TrimPrefix(payload.Path, "payloads/"))
 		files[payload.Path] = src
 	}
 	bundlePath := filepath.Join(base, "bundles", "cc-remote-session-"+id+".zip")
@@ -503,7 +507,7 @@ func doctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	jsonOutput := fs.Bool("json", false, "print machine-readable result")
 	platform := fs.String("platform", "all", "platform to verify: windows, macos, linux, or all")
-	payloadRoot := fs.String("payload-root", "payloads", "offline payload root")
+	payloadRoot := fs.String("payload-root", "payloads", "offline payload root; relative paths resolve against the install root, then the working directory")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -539,11 +543,13 @@ func doctor(args []string) error {
 	for _, name := range []string{"ssh-keygen", "ssh"} {
 		add(doctorCommandCheck(name))
 	}
-	payloadCheckRoot := *payloadRoot
-	if !filepath.IsAbs(payloadCheckRoot) && assetRoot != "" {
-		payloadCheckRoot = filepath.Join(assetRoot, payloadCheckRoot)
+	payloadCheckRoot, payloadRootErr := resolvePayloadRoot(*payloadRoot)
+	if payloadRootErr != nil {
+		add(doctorCheck{Name: "payloads", OK: false, Path: *payloadRoot, Error: payloadRootErr.Error()})
 	}
-	if _, err := collectPlatformPayloads(payloadCheckRoot, *platform); err != nil {
+	if payloadRootErr != nil {
+		// already reported above
+	} else if _, err := collectPlatformPayloads(payloadCheckRoot, *platform); err != nil {
 		add(doctorCheck{Name: "payloads", OK: false, Path: payloadCheckRoot, Error: err.Error()})
 	} else {
 		add(doctorCheck{Name: "payloads", OK: true, Path: payloadCheckRoot, Detail: "payloads verified for " + *platform})
@@ -1699,7 +1705,15 @@ on_error() { local code="$1" line="$2"; trap - ERR; log_line "ERROR: launcher fa
 trap 'on_error $? $LINENO' ERR
 
 if [ "$(uname -s)" != "Darwin" ] && [ "$(uname -s)" != "Linux" ]; then log_line "ERROR: unsupported operating system: $(uname -s)" >&2; hold_on_failure; exit 1; fi
-if [ "$(id -u)" -ne 0 ]; then log_line "Requesting administrator privileges. Enter this Mac's login password once."; exec sudo /bin/bash "$0" --elevated; fi
+if [ "$(id -u)" -ne 0 ]; then
+  if [ -t 0 ]; then
+    log_line "Requesting administrator privileges. Enter this machine's login password once."
+    exec sudo /bin/bash "$0" --elevated
+  fi
+  log_line "ERROR: this launcher must run as root, and no terminal is attached for a password prompt." >&2
+  log_line "Re-run it from a root shell (for example: sudo /bin/bash '$0'), or from an interactive terminal." >&2
+  exit 1
+fi
 mkdir -p "$log_dir" "$root"
 chmod 700 "$log_dir"
 touch "$log"
@@ -1881,8 +1895,16 @@ if [ "$(uname -s)" != "Darwin" ] && [ "$(uname -s)" != "Linux" ]; then
 fi
 
 if [ "$(id -u)" -ne 0 ]; then
-  log_line "Requesting administrator privileges. Enter this Mac's login password once."
-  exec sudo /bin/bash "$self" --elevated
+  if [ -t 0 ]; then
+    log_line "Requesting administrator privileges. Enter this machine's login password once."
+    exec sudo /bin/bash "$self" --elevated
+  fi
+  # Unattended/non-interactive run (cron, script, CI): sudo cannot prompt, so fail
+  # with actionable guidance instead of a bare "sudo: a terminal is required".
+  log_line "ERROR: this launcher must run as root, and no terminal is attached for a password prompt." >&2
+  log_line "Re-run it from a root shell (for example: sudo /bin/bash '$self'), or from an interactive terminal." >&2
+  hold_on_failure
+  exit 1
 fi
 
 mkdir -p "$log_dir" "$root"
@@ -1974,6 +1996,33 @@ func copyFile(dst, src string, perm os.FileMode) error {
 		return err
 	}
 	return os.WriteFile(dst, b, perm)
+}
+
+// resolvePayloadRoot turns the --payload-root flag into an absolute root. A relative
+// value (the "payloads" default) is resolved against the install root that ships the
+// bootstrap assets, so a PATH-shimmed binary works from any working directory; only
+// when the install root has no payloads/ tree does it fall back to the caller's cwd.
+// An absolute value is used exactly as given.
+func resolvePayloadRoot(root string) (string, error) {
+	if filepath.IsAbs(root) {
+		return filepath.Clean(root), nil
+	}
+	assetRoot, assetErr := findAssetRoot()
+	if assetErr == nil {
+		if absRoot, absErr := filepath.Abs(filepath.Join(assetRoot, root)); absErr == nil {
+			if _, err := os.Stat(absRoot); err == nil {
+				return absRoot, nil
+			}
+		}
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		if assetErr != nil {
+			return "", assetErr
+		}
+		return "", err
+	}
+	return filepath.Join(wd, root), nil
 }
 
 func findAssetRoot() (string, error) {
